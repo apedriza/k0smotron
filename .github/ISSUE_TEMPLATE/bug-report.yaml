@@ -38,19 +38,21 @@ body:
     validations:
       required: true
   
-  - type: textarea
+  - type: input
     id: k0smotron-version
     attributes:
       label: k0smotron version
     validations:
       required: true
 
-  - type: textarea
+  - type: input
     id: k0s-version
     attributes:
       label: k0s version
       description: |
         Use: `k0s version`
+    validations:
+      required: true
 
   - type: textarea
     id: additional
