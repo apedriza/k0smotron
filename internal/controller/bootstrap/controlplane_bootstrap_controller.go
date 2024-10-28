@@ -20,7 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
+	"net/http"
+	"net/netip"
 	"sort"
 	"strings"
 	"time"
@@ -213,7 +214,8 @@ func (c *ControlPlaneController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if scope.Cluster.Spec.ControlPlaneEndpoint.IsZero() {
-		return ctrl.Result{}, fmt.Errorf("control plane endpoint is not set")
+		log.Info("control plane endpoint is not set")
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 30}, nil
 	}
 
 	machines, err := collections.GetFilteredMachinesForCluster(ctx, c.Client, cluster, collections.ControlPlaneMachines(cluster.Name), collections.ActiveMachines)
@@ -235,7 +237,8 @@ func (c *ControlPlaneController) Reconcile(ctx context.Context, req ctrl.Request
 	} else {
 		oldest := getFirstRunningMachineWithLatestVersion(machines)
 		if oldest == nil {
-			return ctrl.Result{}, fmt.Errorf("wait for initial control plane provisioning")
+			log.Info("wait for initial control plane provisioning")
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 30}, nil
 		}
 		files, err = c.genControlPlaneJoinFiles(ctx, scope, files, oldest)
 		if err != nil {
@@ -320,7 +323,8 @@ func (c *ControlPlaneController) Reconcile(ctx context.Context, req ctrl.Request
 	config.Status.DataSecretName = ptr.To(bootstrapSecret.Name)
 
 	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		return c.Status().Update(ctx, config)
+		config.ObjectMeta.ResourceVersion = ""
+		return c.Status().Patch(ctx, config, client.Merge)
 	})
 	if err != nil {
 		log.Error(err, "Failed to patch config status")
@@ -372,15 +376,13 @@ func (c *ControlPlaneController) genControlPlaneJoinFiles(ctx context.Context, s
 		return nil, err
 	}
 
-	host, err := c.findFirstControllerIP(ctx, firstControllerMachine)
+	host, err := c.detectJoinHost(ctx, scope, firstControllerMachine)
 	if err != nil {
-		log.Error(err, "Failed to get controller IP")
+		log.Error(err, "Failed to detect join controller host")
 		return nil, err
 	}
 
-	// TODO: fix hardcoded port
-	port := "9443"
-	joinToken, err := kutil.CreateK0sJoinToken(ca.KeyPair.Cert, token, fmt.Sprintf("https://%s:%s", host, port), "controller-bootstrap")
+	joinToken, err := kutil.CreateK0sJoinToken(ca.KeyPair.Cert, token, host, "controller-bootstrap")
 
 	files = append(files, cloudinit.File{
 		Path:        joinTokenFilePath,
@@ -595,6 +597,29 @@ func mergeControllerExtraArgs(scope *ControllerScope) []string {
 	return mergeExtraArgs(scope.Config.Spec.Args, scope.ConfigOwner, scope.WorkerEnabled, scope.Config.Spec.UseSystemHostname)
 }
 
+func (c *ControlPlaneController) detectJoinHost(ctx context.Context, scope *ControllerScope, firstControllerMachine *clusterv1.Machine) (string, error) {
+	httpClient := &http.Client{
+		Transport: c.RESTConfig.Transport,
+		Timeout:   time.Second,
+	}
+
+	// TODO: fix hardcoded port
+	port := "9443"
+	host := fmt.Sprintf("https://%s:%s", scope.Cluster.Spec.ControlPlaneEndpoint.Host, port)
+
+	resp, err := httpClient.Get(fmt.Sprintf("%s/v1beta1/ca", host))
+	if err == nil && resp.StatusCode == http.StatusOK {
+		return host, nil
+	}
+
+	firstControllerIP, err := c.findFirstControllerIP(ctx, firstControllerMachine)
+	if err != nil {
+		return "", fmt.Errorf("failed to get first controller IP: %w", err)
+	}
+
+	return fmt.Sprintf("https://%s:%s", firstControllerIP, port), nil
+}
+
 func (c *ControlPlaneController) findFirstControllerIP(ctx context.Context, firstControllerMachine *clusterv1.Machine) (string, error) {
 	extAddr, intIPv4Addr, intAddr := "", "", ""
 	for _, addr := range firstControllerMachine.Status.Addresses {
@@ -603,12 +628,17 @@ func (c *ControlPlaneController) findFirstControllerIP(ctx context.Context, firs
 			break
 		}
 		if addr.Type == clusterv1.MachineInternalIP {
-			ip := net.ParseIP(addr.Address)
-			if len(ip) == net.IPv4len {
-				intIPv4Addr = ip.To4().String()
+			ip, err := netip.ParseAddr(addr.Address)
+			if err != nil {
+				continue
+			}
+			if ip.Is4() {
+				intIPv4Addr = ip.String()
 				break
 			}
-			intAddr = fmt.Sprintf("[%s]", ip.To16().String())
+			if ip.Is6() {
+				intAddr = fmt.Sprintf("[%s]", ip.WithZone("").String())
+			}
 		}
 	}
 
@@ -632,12 +662,17 @@ func (c *ControlPlaneController) findFirstControllerIP(ctx context.Context, firs
 					break
 				}
 				if addrMap["type"] == string(v1.NodeInternalIP) {
-					ip := net.ParseIP(addrMap["address"].(string))
-					if len(ip) == net.IPv4len {
-						intIPv4Addr = ip.To4().String()
+					ip, err := netip.ParseAddr(addrMap["address"].(string))
+					if err != nil {
+						continue
+					}
+					if ip.Is4() {
+						intIPv4Addr = ip.String()
 						break
 					}
-					intAddr = fmt.Sprintf("[%s]", ip.To16().String())
+					if ip.Is6() {
+						intAddr = fmt.Sprintf("[%s]", ip.WithZone("").String())
+					}
 				}
 			}
 		}

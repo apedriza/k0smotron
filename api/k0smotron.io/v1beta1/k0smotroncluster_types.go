@@ -17,6 +17,7 @@ limitations under the License.
 package v1beta1
 
 import (
+	"crypto/md5"
 	"fmt"
 	"strings"
 
@@ -54,7 +55,7 @@ type ClusterSpec struct {
 	//+kubebuilder:default={"type":"ClusterIP","apiPort":30443,"konnectivityPort":30132}
 	Service ServiceSpec `json:"service,omitempty"`
 	// Persistence defines the persistence configuration. If empty k0smotron
-	// will use emptyDir as a volume.
+	// will use emptyDir as a volume. See https://docs.k0smotron.io/stable/configuration/#persistence
 	//+kubebuilder:validation:Optional
 	Persistence PersistenceSpec `json:"persistence,omitempty"`
 	// KineDataSourceURL defines the kine datasource URL.
@@ -196,6 +197,10 @@ type PersistenceSpec struct {
 	// PersistentVolumeClaim defines the PVC configuration. Will be used as is in case of .spec.persistence.type is pvc.
 	//+kubebuilder:validation:Optional
 	PersistentVolumeClaim *PersistentVolumeClaim `json:"persistentVolumeClaim,omitempty"`
+	// AutoDeletePVCs defines whether the PVC should be deleted when the cluster is deleted.
+	//+kubebuilder:default=false
+	//+kubebuilder:validation:Optional
+	AutoDeletePVCs bool `json:"autoDeletePVCs,omitempty"`
 	// HostPath defines the host path configuration. Will be used as is in case of .spec.persistence.type is hostPath.
 	//+kubebuilder:validation:Optional
 	HostPath string `json:"hostPath,omitempty"`
@@ -261,6 +266,10 @@ type EtcdSpec struct {
 	// Persistence defines the persistence configuration.
 	//+kubebuilder:validation:Optional
 	Persistence EtcdPersistenceSpec `json:"persistence"`
+	// AutoDeletePVCs defines whether the PVC should be deleted when the etcd cluster is deleted.
+	//+kubebuilder:default=false
+	//+kubebuilder:validation:Optional
+	AutoDeletePVCs bool `json:"autoDeletePVCs,omitempty"`
 	// DefragJob defines the etcd defragmentation job configuration.
 	//+kubebuilder:validation:Optional
 	DefragJob DefragJob `json:"defragJob"`
@@ -304,7 +313,7 @@ func init() {
 }
 
 func GetStatefulSetName(clusterName string) string {
-	return fmt.Sprintf("kmc-%s", clusterName)
+	return shortName(fmt.Sprintf("kmc-%s", clusterName))
 }
 
 func (kmc *Cluster) GetStatefulSetName() string {
@@ -312,27 +321,32 @@ func (kmc *Cluster) GetStatefulSetName() string {
 }
 
 func (kmc *Cluster) GetEtcdStatefulSetName() string {
-	return fmt.Sprintf("kmc-%s-etcd", kmc.Name)
+	return kmc.getObjectName("kmc-%s-etcd")
 }
 
 func (kmc *Cluster) GetEtcdDefragJobName() string {
-	return fmt.Sprintf("kmc-%s-defrag", kmc.Name)
+	return kmc.getObjectName("kmc-%s-defrag")
 }
 
 func (kmc *Cluster) GetAdminConfigSecretName() string {
+	// This is the form CAPI expects the secret to be named, don't try to shorten it
 	return fmt.Sprintf("%s-kubeconfig", kmc.Name)
 }
 
 func (kmc *Cluster) GetEntrypointConfigMapName() string {
-	return fmt.Sprintf("kmc-entrypoint-%s-config", kmc.Name)
+	return kmc.getObjectName("kmc-entrypoint-%s-config")
 }
 
 func (kmc *Cluster) GetMonitoringConfigMapName() string {
-	return fmt.Sprintf("kmc-prometheus-%s-config", kmc.Name)
+	return kmc.getObjectName("kmc-prometheus-%s-config")
+}
+
+func (kmc *Cluster) GetMonitoringNginxConfigMapName() string {
+	return kmc.getObjectName("kmc-prometheus-%s-config-nginx")
 }
 
 func (kmc *Cluster) GetConfigMapName() string {
-	return fmt.Sprintf("kmc-%s-config", kmc.Name)
+	return kmc.getObjectName("kmc-%s-config")
 }
 
 func (kmc *Cluster) GetServiceName() string {
@@ -350,21 +364,34 @@ func (kmc *Cluster) GetServiceName() string {
 }
 
 func (kmc *Cluster) GetClusterIPServiceName() string {
-	return fmt.Sprintf("kmc-%s", kmc.Name)
+	return kmc.getObjectName("kmc-%s")
 }
 
 func (kmc *Cluster) GetEtcdServiceName() string {
-	return fmt.Sprintf("kmc-%s-etcd", kmc.Name)
+	return kmc.getObjectName("kmc-%s-etcd")
 }
 
 func (kmc *Cluster) GetLoadBalancerServiceName() string {
-	return fmt.Sprintf("kmc-%s-lb", kmc.Name)
+	return kmc.getObjectName("kmc-%s-lb")
 }
 
 func (kmc *Cluster) GetNodePortServiceName() string {
-	return fmt.Sprintf("kmc-%s-nodeport", kmc.Name)
+	return kmc.getObjectName("kmc-%s-nodeport")
 }
 
 func (kmc *Cluster) GetVolumeName() string {
-	return fmt.Sprintf("kmc-%s", kmc.Name)
+	return kmc.getObjectName("kmc-%s")
+}
+
+const kubeNameLengthLimit = 63
+
+func (kmc *Cluster) getObjectName(pattern string) string {
+	return shortName(fmt.Sprintf(pattern, kmc.Name))
+}
+
+func shortName(name string) string {
+	if len(name) > kubeNameLengthLimit {
+		return fmt.Sprintf("%s-%s", name[:kubeNameLengthLimit-6], fmt.Sprintf("%x", md5.Sum([]byte(name)))[:5])
+	}
+	return name
 }

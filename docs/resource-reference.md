@@ -1875,7 +1875,41 @@ More info: http://kubernetes.io/docs/user-guide/labels<br/>
         </td>
         <td>true</td>
       </tr><tr>
+        <td><b>readyReplicas</b></td>
+        <td>integer</td>
+        <td>
+          <br/>
+          <br/>
+            <i>Format</i>: int32<br/>
+        </td>
+        <td>true</td>
+      </tr><tr>
         <td><b>replicas</b></td>
+        <td>integer</td>
+        <td>
+          <br/>
+          <br/>
+            <i>Format</i>: int32<br/>
+        </td>
+        <td>true</td>
+      </tr><tr>
+        <td><b>selector</b></td>
+        <td>string</td>
+        <td>
+          <br/>
+        </td>
+        <td>true</td>
+      </tr><tr>
+        <td><b>unavailableReplicas</b></td>
+        <td>integer</td>
+        <td>
+          <br/>
+          <br/>
+            <i>Format</i>: int32<br/>
+        </td>
+        <td>true</td>
+      </tr><tr>
+        <td><b>updatedReplicas</b></td>
         <td>integer</td>
         <td>
           <br/>
@@ -1890,6 +1924,86 @@ More info: http://kubernetes.io/docs/user-guide/labels<br/>
           <br/>
         </td>
         <td>true</td>
+      </tr><tr>
+        <td><b><a href="#k0scontrolplanestatusconditionsindex">conditions</a></b></td>
+        <td>[]object</td>
+        <td>
+          Conditions defines current service state of the K0sControlPlane.<br/>
+        </td>
+        <td>false</td>
+      </tr></tbody>
+</table>
+
+
+### K0sControlPlane.status.conditions[index]
+<sup><sup>[↩ Parent](#k0scontrolplanestatus)</sup></sup>
+
+
+
+Condition defines an observation of a Cluster API resource operational state.
+
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Description</th>
+            <th>Required</th>
+        </tr>
+    </thead>
+    <tbody><tr>
+        <td><b>lastTransitionTime</b></td>
+        <td>string</td>
+        <td>
+          Last time the condition transitioned from one status to another.
+This should be when the underlying condition changed. If that is not known, then using the time when
+the API field changed is acceptable.<br/>
+          <br/>
+            <i>Format</i>: date-time<br/>
+        </td>
+        <td>true</td>
+      </tr><tr>
+        <td><b>status</b></td>
+        <td>string</td>
+        <td>
+          Status of the condition, one of True, False, Unknown.<br/>
+        </td>
+        <td>true</td>
+      </tr><tr>
+        <td><b>type</b></td>
+        <td>string</td>
+        <td>
+          Type of condition in CamelCase or in foo.example.com/CamelCase.
+Many .condition.type values are consistent across resources like Available, but because arbitrary conditions
+can be useful (see .node.status.conditions), the ability to deconflict is important.<br/>
+        </td>
+        <td>true</td>
+      </tr><tr>
+        <td><b>message</b></td>
+        <td>string</td>
+        <td>
+          A human readable message indicating details about the transition.
+This field may be empty.<br/>
+        </td>
+        <td>false</td>
+      </tr><tr>
+        <td><b>reason</b></td>
+        <td>string</td>
+        <td>
+          The reason for the condition's last transition in CamelCase.
+The specific API may choose whether or not this field is considered a guaranteed API.
+This field may not be empty.<br/>
+        </td>
+        <td>false</td>
+      </tr><tr>
+        <td><b>severity</b></td>
+        <td>string</td>
+        <td>
+          Severity provides an explicit classification of Reason code, so the users or machines can immediately
+understand the current situation and act accordingly.
+The Severity field MUST be set only when Status=False.<br/>
+        </td>
+        <td>false</td>
       </tr></tbody>
 </table>
 
@@ -2084,6 +2198,16 @@ More info: http://kubernetes.io/docs/user-guide/labels<br/>
         <td>object</td>
         <td>
           <br/>
+        </td>
+        <td>false</td>
+      </tr><tr>
+        <td><b>updateStrategy</b></td>
+        <td>enum</td>
+        <td>
+          UpdateStrategy defines the strategy to use when updating the control plane.<br/>
+          <br/>
+            <i>Enum</i>: InPlace, Recreate<br/>
+            <i>Default</i>: InPlace<br/>
         </td>
         <td>false</td>
       </tr><tr>
@@ -2741,7 +2865,7 @@ https://kubernetes.io/docs/concepts/storage/volumes<br/>
         <td>object</td>
         <td>
           Persistence defines the persistence configuration. If empty k0smotron
-will use emptyDir as a volume.<br/>
+will use emptyDir as a volume. See https://docs.k0smotron.io/stable/configuration/#persistence<br/>
         </td>
         <td>false</td>
       </tr><tr>
@@ -2850,6 +2974,15 @@ Etcd defines the etcd configuration.
         <td>[]string</td>
         <td>
           Args defines the etcd arguments.<br/>
+        </td>
+        <td>false</td>
+      </tr><tr>
+        <td><b>autoDeletePVCs</b></td>
+        <td>boolean</td>
+        <td>
+          AutoDeletePVCs defines whether the PVC should be deleted when the etcd cluster is deleted.<br/>
+          <br/>
+            <i>Default</i>: false<br/>
         </td>
         <td>false</td>
       </tr><tr>
@@ -9916,7 +10049,7 @@ Ex. "ext4", "xfs", "ntfs". Implicitly inferred to be "ext4" if unspecified.<br/>
 
 
 Persistence defines the persistence configuration. If empty k0smotron
-will use emptyDir as a volume.
+will use emptyDir as a volume. See https://docs.k0smotron.io/stable/configuration/#persistence
 
 <table>
     <thead>
@@ -9936,6 +10069,15 @@ will use emptyDir as a volume.
             <i>Default</i>: emptyDir<br/>
         </td>
         <td>true</td>
+      </tr><tr>
+        <td><b>autoDeletePVCs</b></td>
+        <td>boolean</td>
+        <td>
+          AutoDeletePVCs defines whether the PVC should be deleted when the cluster is deleted.<br/>
+          <br/>
+            <i>Default</i>: false<br/>
+        </td>
+        <td>false</td>
       </tr><tr>
         <td><b>hostPath</b></td>
         <td>string</td>
@@ -11148,7 +11290,7 @@ https://kubernetes.io/docs/concepts/storage/volumes<br/>
         <td>object</td>
         <td>
           Persistence defines the persistence configuration. If empty k0smotron
-will use emptyDir as a volume.<br/>
+will use emptyDir as a volume. See https://docs.k0smotron.io/stable/configuration/#persistence<br/>
         </td>
         <td>false</td>
       </tr><tr>
@@ -11257,6 +11399,15 @@ Etcd defines the etcd configuration.
         <td>[]string</td>
         <td>
           Args defines the etcd arguments.<br/>
+        </td>
+        <td>false</td>
+      </tr><tr>
+        <td><b>autoDeletePVCs</b></td>
+        <td>boolean</td>
+        <td>
+          AutoDeletePVCs defines whether the PVC should be deleted when the etcd cluster is deleted.<br/>
+          <br/>
+            <i>Default</i>: false<br/>
         </td>
         <td>false</td>
       </tr><tr>
@@ -18323,7 +18474,7 @@ Ex. "ext4", "xfs", "ntfs". Implicitly inferred to be "ext4" if unspecified.<br/>
 
 
 Persistence defines the persistence configuration. If empty k0smotron
-will use emptyDir as a volume.
+will use emptyDir as a volume. See https://docs.k0smotron.io/stable/configuration/#persistence
 
 <table>
     <thead>
@@ -18343,6 +18494,15 @@ will use emptyDir as a volume.
             <i>Default</i>: emptyDir<br/>
         </td>
         <td>true</td>
+      </tr><tr>
+        <td><b>autoDeletePVCs</b></td>
+        <td>boolean</td>
+        <td>
+          AutoDeletePVCs defines whether the PVC should be deleted when the cluster is deleted.<br/>
+          <br/>
+            <i>Default</i>: false<br/>
+        </td>
+        <td>false</td>
       </tr><tr>
         <td><b>hostPath</b></td>
         <td>string</td>
@@ -35470,7 +35630,7 @@ https://kubernetes.io/docs/concepts/storage/volumes<br/>
         <td>object</td>
         <td>
           Persistence defines the persistence configuration. If empty k0smotron
-will use emptyDir as a volume.<br/>
+will use emptyDir as a volume. See https://docs.k0smotron.io/stable/configuration/#persistence<br/>
         </td>
         <td>false</td>
       </tr><tr>
@@ -35579,6 +35739,15 @@ Etcd defines the etcd configuration.
         <td>[]string</td>
         <td>
           Args defines the etcd arguments.<br/>
+        </td>
+        <td>false</td>
+      </tr><tr>
+        <td><b>autoDeletePVCs</b></td>
+        <td>boolean</td>
+        <td>
+          AutoDeletePVCs defines whether the PVC should be deleted when the etcd cluster is deleted.<br/>
+          <br/>
+            <i>Default</i>: false<br/>
         </td>
         <td>false</td>
       </tr><tr>
@@ -42645,7 +42814,7 @@ Ex. "ext4", "xfs", "ntfs". Implicitly inferred to be "ext4" if unspecified.<br/>
 
 
 Persistence defines the persistence configuration. If empty k0smotron
-will use emptyDir as a volume.
+will use emptyDir as a volume. See https://docs.k0smotron.io/stable/configuration/#persistence
 
 <table>
     <thead>
@@ -42665,6 +42834,15 @@ will use emptyDir as a volume.
             <i>Default</i>: emptyDir<br/>
         </td>
         <td>true</td>
+      </tr><tr>
+        <td><b>autoDeletePVCs</b></td>
+        <td>boolean</td>
+        <td>
+          AutoDeletePVCs defines whether the PVC should be deleted when the cluster is deleted.<br/>
+          <br/>
+            <i>Default</i>: false<br/>
+        </td>
+        <td>false</td>
       </tr><tr>
         <td><b>hostPath</b></td>
         <td>string</td>
