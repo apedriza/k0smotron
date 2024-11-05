@@ -1,0 +1,18 @@
+[
+    {
+      "name": "k0smotron-bootstrap",
+      "config": {
+        "image": "quay.io/k0sproject/k0smotron",
+        "live_reload_deps": [
+          "go.mod",
+          "go.sum",
+          "api",
+          "config",
+          "controllers",
+          "internal"
+        ],
+        "label": "k0smotron-bootstrap",
+        "kustomize_folder": "/config/clusterapi/bootstrap"
+      }
+    }
+  ]

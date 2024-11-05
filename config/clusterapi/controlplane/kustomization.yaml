@@ -9,6 +9,9 @@ namespace: k0smotron
 namePrefix: k0smotron-
 nameSuffix: -control-plane
 
+commonLabels:
+  cluster.x-k8s.io/provider: "controlplane-k0smotron"
+
 # Labels to add to all resources and selectors.
 #labels:
 #- includeSelectors: true
