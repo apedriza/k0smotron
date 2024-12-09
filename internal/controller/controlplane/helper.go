@@ -82,7 +82,7 @@ func (c *K0sController) generateMachine(_ context.Context, name string, cluster 
 
 	labels := map[string]string{
 		"cluster.x-k8s.io/cluster-name":         kcp.Name,
-		"cluster.x-k8s.io/control-plane":        "true",
+		"cluster.x-k8s.io/control-plane":        "",
 		"cluster.x-k8s.io/generateMachine-role": "control-plane",
 	}
 
