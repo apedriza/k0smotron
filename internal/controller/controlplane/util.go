@@ -183,7 +183,7 @@ func controlPlaneCommonLabelsForCluster(kcp *cpv1beta1.K0sControlPlane, clusterN
 
 	// Always force these labels over the ones coming from the spec.
 	labels[clusterv1.ClusterNameLabel] = clusterName
-	labels[clusterv1.MachineControlPlaneLabel] = "true"
+	labels[clusterv1.MachineControlPlaneLabel] = ""
 	// Note: MustFormatValue is used here as the label value can be a hash if the control plane name is longer than 63 characters.
 	labels[clusterv1.MachineControlPlaneNameLabel] = format.MustFormatValue(kcp.Name)
 	return labels

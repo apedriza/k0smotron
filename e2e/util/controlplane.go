@@ -196,7 +196,7 @@ func WaitForOneK0sControlPlaneMachineToExist(ctx context.Context, input WaitForO
 	inClustersNamespaceListOption := crclient.InNamespace(input.Cluster.Namespace)
 	// ControlPlane labels
 	matchClusterListOption := crclient.MatchingLabels{
-		clusterv1.MachineControlPlaneLabel: "true",
+		clusterv1.MachineControlPlaneLabel: "",
 		clusterv1.ClusterNameLabel:         input.Cluster.Name,
 	}
 

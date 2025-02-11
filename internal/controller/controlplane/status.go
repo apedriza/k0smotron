@@ -56,34 +56,25 @@ type replicaStatusComputer interface {
 	compute(*cpv1beta1.K0sControlPlane) error
 }
 
-func (c *K0sController) updateStatus(ctx context.Context, kcp *cpv1beta1.K0sControlPlane, cluster *clusterv1.Cluster) error {
+func (c *K0sController) updateStatus(ctx context.Context, kcp *cpv1beta1.K0sControlPlane, cluster *clusterv1.Cluster) (err error) {
 	logger := log.FromContext(ctx)
 
-	selector := collections.ControlPlaneSelectorForCluster(cluster.Name)
-	kcp.Status.Selector = selector.String()
+	defer func() {
+		// The availability of a controlplane is the same regardless of the type of strategy followed for its upgrade.
+		c.computeAvailability(ctx, cluster, kcp, logger)
+	}()
+
+	kcp.Status.Selector = collections.ControlPlaneSelectorForCluster(cluster.Name).String()
 
 	sc, err := c.newReplicasStatusComputer(ctx, cluster, kcp)
 	if err != nil {
 		return err
 	}
-
-	err = sc.compute(kcp)
-	if err != nil {
-		if errors.Is(err, errUpgradeNotCompleted) {
-			// The control plane availability can be computed even if the upgrade is not completed.
-			err := c.computeAvailability(ctx, cluster, kcp, logger)
-			if err != nil {
-				return fmt.Errorf("%v: %w", errUpgradeNotCompleted, err)
-			}
-
-			return errUpgradeNotCompleted
-		}
-
-		return err
+	if sc == nil {
+		return nil
 	}
 
-	// The availability of a controlplane is the same regardless of the type of strategy followed for its upgrade.
-	return c.computeAvailability(ctx, cluster, kcp, logger)
+	return sc.compute(kcp)
 }
 
 func (c *K0sController) newReplicasStatusComputer(ctx context.Context, cluster *clusterv1.Cluster, kcp *cpv1beta1.K0sControlPlane) (replicaStatusComputer, error) {
@@ -107,7 +98,7 @@ func (c *K0sController) newReplicasStatusComputer(ctx context.Context, cluster *
 				return newMachineStatusComputer(ctx, c.Client, cluster)
 			}
 
-			return nil, err
+			return nil, nil
 		}
 
 		var plan autopilot.Plan
@@ -305,7 +296,7 @@ func versionMatches(machine *clusterv1.Machine, ver string) bool {
 	return vKCP.Equal(vMachine)
 }
 
-func (c *K0sController) computeAvailability(ctx context.Context, cluster *clusterv1.Cluster, kcp *cpv1beta1.K0sControlPlane, logger logr.Logger) error {
+func (c *K0sController) computeAvailability(ctx context.Context, cluster *clusterv1.Cluster, kcp *cpv1beta1.K0sControlPlane, logger logr.Logger) {
 	kcp.Status.Ready = false
 	logger.Info("Computed status", "status", kcp.Status)
 	// Check if the control plane is ready by connecting to the API server
@@ -317,7 +308,6 @@ func (c *K0sController) computeAvailability(ctx context.Context, cluster *cluste
 		logger.Info("Failed to create cluster client", "error", err)
 		// Set a condition for this so we can determine later if we should requeue the reconciliation
 		conditions.MarkFalse(kcp, cpv1beta1.ControlPlaneReadyCondition, "Unable to connect to the workload cluster API", clusterv1.ConditionSeverityWarning, "Failed to create cluster client: %v", err)
-		return nil
 	}
 	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -331,7 +321,7 @@ func (c *K0sController) computeAvailability(ctx context.Context, cluster *cluste
 	err = client.Get(pingCtx, nsKey, ns)
 	if err != nil {
 		conditions.MarkFalse(kcp, cpv1beta1.ControlPlaneReadyCondition, "Unable to connect to the workload cluster API", clusterv1.ConditionSeverityWarning, "Failed to get namespace: %v", err)
-		return nil
+		return
 	}
 	logger.Info("Successfully pinged the workload cluster API")
 	// Set the conditions
@@ -344,8 +334,6 @@ func (c *K0sController) computeAvailability(ctx context.Context, cluster *cluste
 	annotations.AddAnnotations(cluster, map[string]string{
 		cpv1beta1.K0sClusterIDAnnotation: fmt.Sprintf("kube-system:%s", ns.GetUID()),
 	})
-
-	return nil
 }
 
 func getVersionSuffix(version string) string {

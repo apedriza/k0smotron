@@ -1,5 +1,3 @@
-# This cluster template is used when a cluster needs to be deployed using the Out-Of-Cluster mode, 
-# i.e. the control plane is running on CAPI managed Machines.
 apiVersion: cluster.x-k8s.io/v1beta1
 kind: Cluster
 metadata:
@@ -37,11 +35,9 @@ apiVersion: controlplane.cluster.x-k8s.io/v1beta1
 kind: K0sControlPlane
 metadata:
   name: ${CLUSTER_NAME}-docker-test
-  namespace: ${NAMESPACE}
 spec:
   replicas: ${CONTROL_PLANE_MACHINE_COUNT}
-  version: v1.30.1+k0s.0
-  updateStrategy: ${UPDATE_STRATEGY}
+  version: v1.31.2+k0s.0
   k0sConfigSpec:
     args:
     - --enable-worker
@@ -58,13 +54,41 @@ spec:
           enabled: false
         network:
           controlPlaneLoadBalancing:
-            enabled: false 
+            enabled: false
+    preStartCommands:
+    - ./wait-signal.sh "${TOKEN}" "${SERVER}" "${NAMESPACE}"
     files:
     - path: /tmp/test-file-secret
       contentFrom: 
         secretRef: 
           name: test-file-secret
           key: value
+    - path: /wait-signal.sh
+      content: |
+        #!/bin/bash
+  
+        set -o errexit
+        set -o pipefail
+        
+        echo "Waiting for signal..."
+        
+        TOKEN=$1
+        SERVER=$2
+        NAMESPACE=$3
+        
+        while true;
+        do
+          sleep 1s
+  
+          signal=$(curl -k -s --header "Authorization: Bearer $TOKEN" $SERVER/api/v1/namespaces/$NAMESPACE/configmaps/mhc-test | jq -r .data.signal?)
+          echo "signal $signal"
+  
+          if [ "$signal" == "pass" ]; then
+             curl -k -s --header "Authorization: Bearer $TOKEN" -XPATCH -H "Content-Type: application/strategic-merge-patch+json" --data '{"data": {"signal": "ack-pass"}}' $SERVER/api/v1/namespaces/$NAMESPACE/configmaps/mhc-test
+             exit 0
+          fi
+        done
+      permissions: "0777"
   machineTemplate:
     infrastructureRef:
       apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
@@ -78,62 +102,6 @@ metadata:
   name: docker-test
   namespace: ${NAMESPACE}
 spec:
----
-apiVersion: cluster.x-k8s.io/v1beta1
-kind: MachineDeployment
-metadata:
-  name: worker-md-0
-  namespace: ${NAMESPACE}
-spec:
-  clusterName: ${CLUSTER_NAME}
-  replicas: 1
-  selector:
-    matchLabels:
-      cluster.x-k8s.io/cluster-name: ${CLUSTER_NAME}
-
-      # This label will be needed for upgrade test
-      # it will be used as a selector for only selecting
-      # machines belonging to this machine deployment
-      cluster.x-k8s.io/deployment-name: worker-md-0
-  template:
-    metadata:
-      labels:
-        cluster.x-k8s.io/deployment-name: worker-md-0
-    spec:
-      version: v1.30.1
-      clusterName: ${CLUSTER_NAME}
-      bootstrap:
-        configRef:
-          apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
-          kind: K0sWorkerConfig
-          name: docker-test-worker-0
-      infrastructureRef:
-        apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
-        kind: DockerMachine
-        name: ${CLUSTER_NAME}-docker-test-worker-0
----
-apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
-kind: K0sWorkerConfig
-metadata:
-  name: docker-test-worker-0
-  namespace: ${NAMESPACE}
-spec:
-  # version is deliberately different to be able to verify we actually pick it up :)
-  version: v1.30.1+k0s.0
-  args:
-    - --labels=k0sproject.io/foo=bar
-  preStartCommands:
-    - echo -n "pre-start" > /tmp/pre-start
-  postStartCommands:
-    - echo -n "post-start" > /tmp/post-start
-  files:
-    - path: /tmp/test-file
-      content: test-file
-    - path: /tmp/test-file-secret
-      contentFrom: 
-        secretRef: 
-          name: test-file-secret
-          key: value
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: DockerMachine
@@ -151,3 +119,20 @@ metadata:
 type: Opaque
 data:
   value: dGVzdA==
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: MachineHealthCheck
+metadata:
+  name: ${CLUSTER_NAME}-mhc-0
+spec:
+  clusterName: ${CLUSTER_NAME}
+  maxUnhealthy: 100%
+  nodeStartupTimeout: 30s
+  selector:
+    matchLabels:
+      cluster.x-k8s.io/control-plane: ""
+      mhc-test: fail
+  unhealthyConditions:
+  - status: "False"
+    timeout: 10s
+    type: e2e.remediation.condition
