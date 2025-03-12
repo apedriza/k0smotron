@@ -44,6 +44,8 @@ func (p *ProviderIDController) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 
+	fmt.Println("machine.Spec.Bootstrap.ConfigRef.Kind: ", machine.Spec.Bootstrap.ConfigRef.Kind)
+
 	// Skip non-k0s machines
 	if machine.Spec.Bootstrap.ConfigRef.Kind != "K0sControllerConfig" && machine.Spec.Bootstrap.ConfigRef.Kind != "K0sWorkerConfig" {
 		return ctrl.Result{}, nil
