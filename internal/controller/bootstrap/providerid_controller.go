@@ -43,7 +43,6 @@ func (p *ProviderIDController) Reconcile(ctx context.Context, req ctrl.Request) 
 	if capiutil.IsControlPlaneMachine(machine) && machine.ObjectMeta.Labels["k0smotron.io/control-plane-worker-enabled"] != "true" {
 		return ctrl.Result{}, nil
 	}
-
 	fmt.Println("machine.Spec.Bootstrap.ConfigRef.Kind: ", machine.Spec.Bootstrap.ConfigRef.Kind)
 
 	// Skip non-k0s machines
