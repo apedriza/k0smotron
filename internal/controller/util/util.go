@@ -43,12 +43,12 @@ func AnnotationsForK0smotronCluster(kmc *km.Cluster) map[string]string {
 }
 
 // AddToExistingSans merges original sans list with a new sans slice avoiding duplicated values.
-func AddToExistingSans(existing []string, new []string) []string {
+func AddToExistingSans(existingSans []string, newSans []string) []string {
 	uniques := make(map[string]struct{})
-	for _, val := range existing {
+	for _, val := range existingSans {
 		uniques[val] = struct{}{}
 	}
-	for _, val := range new {
+	for _, val := range newSans {
 		uniques[val] = struct{}{}
 	}
 	finalSans := make([]string, 0, len(uniques))

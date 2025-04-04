@@ -98,7 +98,7 @@ func (s *CAPIDockerMachineTemplateUpdateRecreate) TestCAPIControlPlaneDockerDown
 
 	var localPort int
 	// nolint:staticcheck
-	err := wait.PollImmediateUntilWithContext(s.ctx, 1*time.Second, func(ctx context.Context) (bool, error) {
+	err := wait.PollImmediateUntilWithContext(s.ctx, 1*time.Second, func(_ context.Context) (bool, error) {
 		var portErr error
 		localPort, portErr = getLBPort("docker-test-lb")
 		if portErr != nil {
@@ -114,7 +114,7 @@ func (s *CAPIDockerMachineTemplateUpdateRecreate) TestCAPIControlPlaneDockerDown
 	s.Require().NoError(err)
 
 	// nolint:staticcheck
-	err = wait.PollImmediateUntilWithContext(s.ctx, 1*time.Second, func(ctx context.Context) (bool, error) {
+	err = wait.PollImmediateUntilWithContext(s.ctx, 1*time.Second, func(_ context.Context) (bool, error) {
 		b, _ := s.client.RESTClient().
 			Get().
 			AbsPath("/healthz").
@@ -125,7 +125,7 @@ func (s *CAPIDockerMachineTemplateUpdateRecreate) TestCAPIControlPlaneDockerDown
 	s.Require().NoError(err)
 
 	var nodeIDs []string
-	err = wait.PollUntilContextCancel(s.ctx, 1*time.Second, true, func(ctx context.Context) (bool, error) {
+	err = wait.PollUntilContextCancel(s.ctx, 1*time.Second, true, func(_ context.Context) (bool, error) {
 		var err error
 		nodeIDs, err = util.GetControlPlaneNodesIDs("docker-test-")
 
@@ -138,7 +138,7 @@ func (s *CAPIDockerMachineTemplateUpdateRecreate) TestCAPIControlPlaneDockerDown
 	s.Require().NoError(err)
 
 	for i := 0; i < 3; i++ {
-		err = wait.PollUntilContextCancel(s.ctx, 1*time.Second, true, func(ctx context.Context) (bool, error) {
+		err = wait.PollUntilContextCancel(s.ctx, 1*time.Second, true, func(_ context.Context) (bool, error) {
 			output, err := exec.Command("docker", "exec", fmt.Sprintf("docker-test-%d", i), "k0s", "status").Output()
 			if err != nil {
 				return false, nil
@@ -155,7 +155,7 @@ func (s *CAPIDockerMachineTemplateUpdateRecreate) TestCAPIControlPlaneDockerDown
 	s.T().Log("updating cluster objects")
 	s.updateClusterObjects()
 
-	err = wait.PollUntilContextCancel(s.ctx, 100*time.Millisecond, true, func(ctx context.Context) (bool, error) {
+	err = wait.PollUntilContextCancel(s.ctx, 100*time.Millisecond, true, func(_ context.Context) (bool, error) {
 		var obj unstructured.UnstructuredList
 		err := s.client.RESTClient().
 			Get().

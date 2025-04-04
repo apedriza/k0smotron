@@ -141,7 +141,7 @@ func (s *RemoteMachineTemplateSuite) TestCAPIRemoteMachine() {
 	s.T().Log("cluster objects applied, waiting for cluster to be ready")
 	var localPort int
 	// nolint:staticcheck
-	err = wait.PollImmediateUntilWithContext(ctx, 1*time.Second, func(ctx context.Context) (bool, error) {
+	err = wait.PollImmediateUntilWithContext(ctx, 1*time.Second, func(_ context.Context) (bool, error) {
 		localPort, _ = getLBPort("TestRemoteMachineSuite-k0smotron0")
 		return localPort > 0, nil
 	})
@@ -154,7 +154,7 @@ func (s *RemoteMachineTemplateSuite) TestCAPIRemoteMachine() {
 	s.T().Log("verify the RemoteMachine is at expected state")
 	expectedProviderID := fmt.Sprintf("remote-machine://%s:22", s.getWorkerIP())
 	// nolint:staticcheck
-	err = wait.PollImmediateUntilWithContext(ctx, 1*time.Second, func(ctx context.Context) (bool, error) {
+	err = wait.PollImmediateUntilWithContext(ctx, 1*time.Second, func(_ context.Context) (bool, error) {
 		rm, err := s.getRemoteMachine("remote-test-0", "default")
 		if err != nil {
 			s.T().Log(err)

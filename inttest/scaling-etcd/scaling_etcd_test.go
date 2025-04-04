@@ -75,7 +75,7 @@ func (s *ScalingSuite) TestK0sGetsUp() {
 	s.scaleK0smotronCluster(s.Context(), rc)
 
 	// nolint:staticcheck
-	err = wait.PollImmediateUntilWithContext(s.Context(), 1*time.Second, func(ctx context.Context) (bool, error) {
+	err = wait.PollImmediateUntilWithContext(s.Context(), 1*time.Second, func(_ context.Context) (bool, error) {
 		cpSts, err := kc.AppsV1().StatefulSets("default").Get(s.Context(), "kmc-scaling", metav1.GetOptions{})
 		if err != nil {
 			return false, err
@@ -85,7 +85,7 @@ func (s *ScalingSuite) TestK0sGetsUp() {
 	})
 	s.Require().NoError(err)
 	// nolint:staticcheck
-	err = wait.PollImmediateUntilWithContext(s.Context(), 1*time.Second, func(ctx context.Context) (bool, error) {
+	err = wait.PollImmediateUntilWithContext(s.Context(), 1*time.Second, func(_ context.Context) (bool, error) {
 		etcdSts, err := kc.AppsV1().StatefulSets("default").Get(s.Context(), "kmc-scaling-etcd", metav1.GetOptions{})
 		if err != nil {
 			return false, nil
