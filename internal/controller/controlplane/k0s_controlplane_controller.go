@@ -580,14 +580,6 @@ func (c *K0sController) deleteK0sNodeResources(ctx context.Context, cluster *clu
 		}
 	}
 
-	if err := c.deleteBootstrapConfig(ctx, machine.Name, kcp); err != nil {
-		return fmt.Errorf("error deleting machine from template: %w", err)
-	}
-
-	if err := c.deleteMachineFromTemplate(ctx, machine.Name, cluster, kcp); err != nil {
-		return fmt.Errorf("error deleting machine from template: %w", err)
-	}
-
 	if err := c.removePreTerminateHookAnnotationFromMachine(ctx, machine); err != nil {
 		return fmt.Errorf("failed to remove pre-terminate hook from control plane Machine '%s': %w", machine.Name, err)
 	}
