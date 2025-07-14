@@ -219,7 +219,18 @@ func (rc *machineStatus) compute(kcp *cpv1beta1.K0sControlPlane) error {
 			unavailableReplicas++
 		}
 
-		if versionMatches(machine, kcp.Spec.Version) {
+		machineVersion, err := version.NewVersion(*machine.Spec.Version)
+		if err != nil {
+			return fmt.Errorf("error parsing machine version %s: %w", *machine.Spec.Version, err)
+		}
+
+		kcpVersion, err := version.NewVersion(fmt.Sprintf(k0sVersionFormat, kcp.Spec.Version, kcp.Spec.K0sVersion))
+		if err != nil {
+			return fmt.Errorf("error parsing k0s version %s: %w", kcp.Spec.Version, err)
+		}
+
+		// Assuming that the machine version always uses the kcp version format
+		if machineVersion.Equal(kcpVersion) {
 			updatedReplicas++
 		}
 	}
@@ -233,7 +244,7 @@ func (rc *machineStatus) compute(kcp *cpv1beta1.K0sControlPlane) error {
 	kcp.Status.UpdatedReplicas = int32(updatedReplicas)
 	kcp.Status.UnavailableReplicas = int32(unavailableReplicas)
 
-	// Find the lowest version
+	// // Find the lowest version
 	lowestMachineVersion, err := minVersion(rc.machines)
 	if err != nil {
 		log.Log.Error(err, "Failed to get the lowest version")
@@ -242,14 +253,14 @@ func (rc *machineStatus) compute(kcp *cpv1beta1.K0sControlPlane) error {
 
 	kcp.Status.Version = lowestMachineVersion
 
-	// If kcp has suffix but machines don't, we need to add it to minVersion
-	// Otherwise CAPI topology will not be able to match the versions and might try to recreate the machines
-	// or restrict the upgrade path
-	if strings.Contains(kcp.Spec.Version, "+") && !strings.Contains(lowestMachineVersion, "+") && lowestMachineVersion != "" {
-		// Get the suffix from kcp version
-		suffix := strings.Split(kcp.Spec.Version, "+")[1]
-		kcp.Status.Version = kcp.Status.Version + "+" + suffix
-	}
+	// // If kcp has suffix but machines don't, we need to add it to minVersion
+	// // Otherwise CAPI topology will not be able to match the versions and might try to recreate the machines
+	// // or restrict the upgrade path
+	// if strings.Contains(kcp.Spec.Version, "+") && !strings.Contains(lowestMachineVersion, "+") && lowestMachineVersion != "" {
+	// 	// Get the suffix from kcp version
+	// 	suffix := strings.Split(kcp.Spec.Version, "+")[1]
+	// 	kcp.Status.Version = kcp.Status.Version + "+" + suffix
+	// }
 
 	// If the controlplane spec does NOT have workers enabled
 	// we need to mark the controlplane as externally managed
@@ -264,37 +275,37 @@ func (rc *machineStatus) compute(kcp *cpv1beta1.K0sControlPlane) error {
 }
 
 // versionMatches checks if the machine version matches the kcp version taking the possibly missing suffix into account
-func versionMatches(machine *clusterv1.Machine, ver string) bool {
+// func versionMatches(machine *clusterv1.Machine, ver string) bool {
 
-	if machine.Spec.Version == nil || *machine.Spec.Version == "" {
-		return false
-	}
+// 	if machine.Spec.Version == nil || *machine.Spec.Version == "" {
+// 		return false
+// 	}
 
-	if *machine.Spec.Version == ver {
-		return true
-	}
+// 	if *machine.Spec.Version == ver {
+// 		return true
+// 	}
 
-	machineVersion := *machine.Spec.Version
-	kcpVersion := ver
+// 	machineVersion := *machine.Spec.Version
+// 	kcpVersion := ver
 
-	// If either of the versions is missing the suffix, we need to add it
-	// But take the suffix from kcp version if present
-	kcpSuffix := getVersionSuffix(kcpVersion)
-	if kcpSuffix == "" {
-		kcpSuffix = "k0s.0"
-		kcpVersion = kcpVersion + "+" + kcpSuffix
-	}
+// 	// If either of the versions is missing the suffix, we need to add it
+// 	// But take the suffix from kcp version if present
+// 	kcpSuffix := getVersionSuffix(kcpVersion)
+// 	if kcpSuffix == "" {
+// 		kcpSuffix = "k0s.0"
+// 		kcpVersion = kcpVersion + "+" + kcpSuffix
+// 	}
 
-	if machineSuffix := getVersionSuffix(machineVersion); machineSuffix == "" {
-		machineVersion = machineVersion + "+" + kcpSuffix
-	}
+// 	if machineSuffix := getVersionSuffix(machineVersion); machineSuffix == "" {
+// 		machineVersion = machineVersion + "+" + kcpSuffix
+// 	}
 
-	// Compare the versions
-	vMachine := version.MustParse(machineVersion)
-	vKCP := version.MustParse(kcpVersion)
+// 	// Compare the versions
+// 	vMachine := version.MustParse(machineVersion)
+// 	vKCP := version.MustParse(kcpVersion)
 
-	return vKCP.Equal(vMachine)
-}
+// 	return vKCP.Equal(vMachine)
+// }
 
 func (c *K0sController) computeAvailability(ctx context.Context, cluster *clusterv1.Cluster, kcp *cpv1beta1.K0sControlPlane, logger logr.Logger) {
 	kcp.Status.Ready = false

@@ -94,10 +94,14 @@ type K0sControlPlaneSpec struct {
 	//+kubebuilder:validation:Enum=InPlace;Recreate
 	//+kubebuilder:default=InPlace
 	UpdateStrategy UpdateStrategy `json:"updateStrategy,omitempty"`
-	// Version defines the k0s version to be deployed. You can use a specific k0s version (e.g. v1.27.1+k0s.0) or
-	// just the Kubernetes version (e.g. v1.27.1). If left empty, k0smotron will select one automatically.
+	// Version defines the desired Kubernetes version. If left empty, k0smotron will select one automatically.
 	//+kubebuilder:validation:Optional
 	Version string `json:"version,omitempty"`
+	// K0sVersion is the version of k0s built on top of the desired Kubernetes version
+	// More info: https://docs.k0sproject.io/stable/releases/#version-string
+	//+kubebuilder:validation:Optional
+	//+kubebuilder:default=k0s.0
+	K0sVersion string `json:"k0sVersion,omitempty"`
 }
 
 type K0sControlPlaneMachineTemplate struct {
@@ -158,7 +162,7 @@ type K0sControlPlaneStatus struct {
 	// +optional
 	Replicas int32 `json:"replicas"`
 
-	// version represents the minimum Kubernetes version for the control plane machines
+	// version represents the minimum K0s version for the control plane machines
 	// in the cluster.
 	// +optional
 	Version string `json:"version"`

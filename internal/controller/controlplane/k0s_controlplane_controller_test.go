@@ -61,8 +61,26 @@ import (
 	autopilot "github.com/k0sproject/k0s/pkg/apis/autopilot/v1beta2"
 	bootstrapv1 "github.com/k0sproject/k0smotron/api/bootstrap/v1beta1"
 	cpv1beta1 "github.com/k0sproject/k0smotron/api/controlplane/v1beta1"
+	"github.com/k0sproject/version"
 	kubeadmConfig "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1beta1"
 )
+
+func TestK0sVersion(t *testing.T) {
+	// Test the version string representation
+	oldV, err := version.NewVersion("v1.31.0")
+	if err != nil {
+		t.Fatalf("failed to create version: %v", err)
+	}
+	newV, err := version.NewVersion("v1.33.0")
+	if err != nil {
+		t.Fatalf("failed to create version: %v", err)
+	}
+
+	// According to the Kubernetes skew policy, we can't upgrade more than one minor version at a time.
+	if newV.Segments()[1]-oldV.Segments()[1] > 1 {
+		t.Fatalf("failed to create version: %v", err)
+	}
+}
 
 func TestK0sConfigEnrichment(t *testing.T) {
 	var testCases = []struct {

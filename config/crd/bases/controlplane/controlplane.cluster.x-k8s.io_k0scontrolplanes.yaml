@@ -247,6 +247,12 @@ spec:
                       By default, k0smotron will use Machine name as a node name. If true, it will pick it from `hostname` command output.
                     type: boolean
                 type: object
+              k0sVersion:
+                default: k0s.0
+                description: |-
+                  K0sVersion is the version of k0s built on top of the desired Kubernetes version
+                  More info: https://docs.k0sproject.io/stable/releases/#version-string
+                type: string
               machineTemplate:
                 properties:
                   infrastructureRef:
@@ -352,9 +358,8 @@ spec:
                 - Recreate
                 type: string
               version:
-                description: |-
-                  Version defines the k0s version to be deployed. You can use a specific k0s version (e.g. v1.27.1+k0s.0) or
-                  just the Kubernetes version (e.g. v1.27.1). If left empty, k0smotron will select one automatically.
+                description: Version defines the desired Kubernetes version. If left
+                  empty, k0smotron will select one automatically.
                 type: string
             required:
             - k0sConfigSpec
@@ -460,7 +465,7 @@ spec:
                 type: integer
               version:
                 description: |-
-                  version represents the minimum Kubernetes version for the control plane machines
+                  version represents the minimum K0s version for the control plane machines
                   in the cluster.
                 type: string
             type: object

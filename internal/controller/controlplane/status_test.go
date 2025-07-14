@@ -717,106 +717,106 @@ func Test_machineStatusCompute(t *testing.T) {
 	})
 }
 
-func Test_versionMatches(t *testing.T) {
-	type args struct {
-		machine *clusterv1.Machine
-		ver     string
-	}
-	tests := []struct {
-		name string
-		args args
-		want bool
-	}{
-		{
-			name: "version matches, both without suffix",
-			args: args{
-				machine: &clusterv1.Machine{
-					Spec: clusterv1.MachineSpec{
-						Version: ptr.To("v1.31.0"),
-					},
-				},
-				ver: "v1.31.0",
-			},
-			want: true,
-		},
-		{
-			name: "version does not match",
-			args: args{
-				machine: &clusterv1.Machine{
-					Spec: clusterv1.MachineSpec{
-						Version: ptr.To("v1.31.0"),
-					},
-				},
-				ver: "v1.30.0",
-			},
-			want: false,
-		},
-		{
-			name: "semver version match, machine version is missing the suffix",
-			args: args{
-				machine: &clusterv1.Machine{
-					Spec: clusterv1.MachineSpec{
-						Version: ptr.To("v1.31.0"),
-					},
-				},
-				ver: "v1.31.0+k0s.0",
-			},
-			want: true,
-		},
-		{
-			name: "semver version match, kcp version is missing the suffix",
-			args: args{
-				machine: &clusterv1.Machine{
-					Spec: clusterv1.MachineSpec{
-						Version: ptr.To("v1.31.0+k0s.0"),
-					},
-				},
-				ver: "v1.31.0",
-			},
-			want: true,
-		},
-		{
-			name: "versions match, both with the suffix",
-			args: args{
-				machine: &clusterv1.Machine{
-					Spec: clusterv1.MachineSpec{
-						Version: ptr.To("v1.31.0+k0s.0"),
-					},
-				},
-				ver: "v1.31.0+k0s.0",
-			},
-			want: true,
-		},
-		{
-			name: "versions do not match, machine version is missing",
-			args: args{
-				machine: &clusterv1.Machine{
-					Spec: clusterv1.MachineSpec{
-						Version: nil,
-					},
-				},
-				ver: "v1.31.0+k0s.0",
-			},
-			want: false,
-		},
-		{
-			name: "versions do not match, machine version is empty",
-			args: args{
-				machine: &clusterv1.Machine{
-					Spec: clusterv1.MachineSpec{
-						Version: ptr.To(""),
-					},
-				},
-				ver: "v1.31.0+k0s.0",
-			},
-			want: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := versionMatches(tt.args.machine, tt.args.ver); got != tt.want {
-				t.Errorf("versionMatches() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
+// func Test_versionMatches(t *testing.T) {
+// 	type args struct {
+// 		machine *clusterv1.Machine
+// 		ver     string
+// 	}
+// 	tests := []struct {
+// 		name string
+// 		args args
+// 		want bool
+// 	}{
+// 		{
+// 			name: "version matches, both without suffix",
+// 			args: args{
+// 				machine: &clusterv1.Machine{
+// 					Spec: clusterv1.MachineSpec{
+// 						Version: ptr.To("v1.31.0"),
+// 					},
+// 				},
+// 				ver: "v1.31.0",
+// 			},
+// 			want: true,
+// 		},
+// 		{
+// 			name: "version does not match",
+// 			args: args{
+// 				machine: &clusterv1.Machine{
+// 					Spec: clusterv1.MachineSpec{
+// 						Version: ptr.To("v1.31.0"),
+// 					},
+// 				},
+// 				ver: "v1.30.0",
+// 			},
+// 			want: false,
+// 		},
+// 		{
+// 			name: "semver version match, machine version is missing the suffix",
+// 			args: args{
+// 				machine: &clusterv1.Machine{
+// 					Spec: clusterv1.MachineSpec{
+// 						Version: ptr.To("v1.31.0"),
+// 					},
+// 				},
+// 				ver: "v1.31.0+k0s.0",
+// 			},
+// 			want: true,
+// 		},
+// 		{
+// 			name: "semver version match, kcp version is missing the suffix",
+// 			args: args{
+// 				machine: &clusterv1.Machine{
+// 					Spec: clusterv1.MachineSpec{
+// 						Version: ptr.To("v1.31.0+k0s.0"),
+// 					},
+// 				},
+// 				ver: "v1.31.0",
+// 			},
+// 			want: true,
+// 		},
+// 		{
+// 			name: "versions match, both with the suffix",
+// 			args: args{
+// 				machine: &clusterv1.Machine{
+// 					Spec: clusterv1.MachineSpec{
+// 						Version: ptr.To("v1.31.0+k0s.0"),
+// 					},
+// 				},
+// 				ver: "v1.31.0+k0s.0",
+// 			},
+// 			want: true,
+// 		},
+// 		{
+// 			name: "versions do not match, machine version is missing",
+// 			args: args{
+// 				machine: &clusterv1.Machine{
+// 					Spec: clusterv1.MachineSpec{
+// 						Version: nil,
+// 					},
+// 				},
+// 				ver: "v1.31.0+k0s.0",
+// 			},
+// 			want: false,
+// 		},
+// 		{
+// 			name: "versions do not match, machine version is empty",
+// 			args: args{
+// 				machine: &clusterv1.Machine{
+// 					Spec: clusterv1.MachineSpec{
+// 						Version: ptr.To(""),
+// 					},
+// 				},
+// 				ver: "v1.31.0+k0s.0",
+// 			},
+// 			want: false,
+// 		},
+// 	}
+// 	for _, tt := range tests {
+// 		t.Run(tt.name, func(t *testing.T) {
+// 			if got := versionMatches(tt.args.machine, tt.args.ver); got != tt.want {
+// 				t.Errorf("versionMatches() = %v, want %v", got, tt.want)
+// 			}
+// 		})
+// 	}
+// }

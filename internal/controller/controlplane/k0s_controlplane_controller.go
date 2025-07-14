@@ -21,12 +21,12 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	autopilot "github.com/k0sproject/k0s/pkg/apis/autopilot/v1beta2"
 	"github.com/k0sproject/k0smotron/internal/controller/util"
+	"github.com/k0sproject/version"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -59,7 +59,7 @@ import (
 )
 
 const (
-	defaultK0sSuffix  = "k0s.0"
+	k0sVersionFormat  = "%s+%s"
 	defaultK0sVersion = "v1.27.9+k0s.0"
 )
 
@@ -91,13 +91,6 @@ func (c *K0sController) Reconcile(ctx context.Context, req ctrl.Request) (res ct
 	log := log.FromContext(ctx).WithValues("controlplane", req.NamespacedName)
 	kcp := &cpv1beta1.K0sControlPlane{}
 
-	defer func() {
-		version := ""
-		if kcp != nil {
-			version = kcp.Spec.Version
-		}
-		log.Info("Reconciliation finished", "result", res, "error", err, "status.version", version)
-	}()
 	if err := c.Get(ctx, req.NamespacedName, kcp); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -116,14 +109,6 @@ func (c *K0sController) Reconcile(ctx context.Context, req ctrl.Request) (res ct
 	}
 
 	log.Info("Reconciling K0sControlPlane", "version", kcp.Spec.Version)
-
-	if kcp.Spec.Version == "" {
-		kcp.Spec.Version = defaultK0sVersion
-	}
-
-	if !strings.Contains(kcp.Spec.Version, "+k0s.") {
-		kcp.Spec.Version = fmt.Sprintf("%s+%s", kcp.Spec.Version, defaultK0sSuffix)
-	}
 
 	cluster, err := capiutil.GetOwnerCluster(ctx, c.Client, kcp.ObjectMeta)
 	if err != nil {
@@ -396,9 +381,22 @@ func (c *K0sController) reconcileMachines(ctx context.Context, cluster *clusterv
 	desiredMachineNamesSlice := []string{}
 
 	var clusterIsUpdating bool
+	var kcpVersionToUpdate string
 	for _, m := range activeMachines.SortedByCreationTimestamp() {
-		if m.Spec.Version == nil || (!versionMatches(m, kcp.Spec.Version)) {
+
+		machineVersion, err := version.NewVersion(*m.Spec.Version)
+		if err != nil {
+			return fmt.Errorf("error parsing machine version %s: %w", *m.Spec.Version, err)
+		}
+
+		kcpVersion, err := version.NewVersion(fmt.Sprintf(k0sVersionFormat, kcp.Spec.Version, kcp.Spec.K0sVersion))
+		if err != nil {
+			return fmt.Errorf("error parsing k0s version %s: %w", kcp.Spec.Version, err)
+		}
+
+		if m.Spec.Version == nil || (!machineVersion.Equal(kcpVersion)) {
 			clusterIsUpdating = true
+			kcpVersionToUpdate = kcpVersion.String()
 			if kcp.Spec.UpdateStrategy == cpv1beta1.UpdateInPlace {
 				desiredMachineNamesSlice = append(desiredMachineNamesSlice, m.Name)
 			} else {
@@ -430,7 +428,7 @@ func (c *K0sController) reconcileMachines(ctx context.Context, cluster *clusterv
 	}()
 
 	if clusterIsUpdating {
-		log.Log.Info("Cluster is updating", "currentVersion", currentVersion, "newVersion", kcp.Spec.Version, "strategy", kcp.Spec.UpdateStrategy)
+		log.Log.Info("Cluster is updating", "currentVersion", currentVersion, "newVersion", kcpVersionToUpdate, "strategy", kcp.Spec.UpdateStrategy)
 		if kcp.Spec.UpdateStrategy == cpv1beta1.UpdateRecreate {
 			// If the cluster is running in single mode, we can't use the Recreate strategy
 			if kcp.Spec.K0sConfigSpec.Args != nil {
@@ -605,7 +603,7 @@ func (c *K0sController) createBootstrapConfig(ctx context.Context, name string, 
 			}},
 		},
 		Spec: bootstrapv1.K0sControllerConfigSpec{
-			Version:       kcp.Spec.Version,
+			Version:       fmt.Sprintf(k0sVersionFormat, kcp.Spec.Version, kcp.Spec.K0sVersion),
 			K0sConfigSpec: &kcp.Spec.K0sConfigSpec,
 		},
 	}

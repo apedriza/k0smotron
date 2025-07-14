@@ -20,13 +20,13 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/k0sproject/version"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"github.com/k0sproject/k0smotron/api/controlplane/v1beta1"
+	"github.com/k0sproject/version"
 )
 
 // +kubebuilder:webhook:path=/validate-controlplane-cluster-x-k8s-io-v1beta1-k0scontrolplane,mutating=false,failurePolicy=fail,sideEffects=None,groups=controlplane.cluster.x-k8s.io,resources=k0scontrolplanes,verbs=create;update,versions=v1beta1,name=validate-k0scontrolplane-v1beta1.k0smotron.io,admissionReviewVersions=v1
@@ -46,7 +46,7 @@ func (v *K0sControlPlaneValidator) ValidateCreate(_ context.Context, obj runtime
 		return nil, fmt.Errorf("expected a K0sControlPlane object but got %T", obj)
 	}
 
-	return nil, validateK0sControlPlane(kcp)
+	return validateK0sControlPlane(kcp)
 }
 
 // ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type K0sControlPlane.
@@ -71,12 +71,12 @@ func (v *K0sControlPlaneValidator) ValidateUpdate(_ context.Context, oldObj, new
 		}
 
 		// According to the Kubernetes skew policy, we can't upgrade more than one minor version at a time.
-		if newV.Core().Segments()[1]-oldV.Core().Segments()[1] > 1 {
+		if newV.Segments()[1]-oldV.Segments()[1] > 1 {
 			return nil, fmt.Errorf("upgrading more than one minor version at a time is not allowed by the Kubernetes skew policy")
 		}
 	}
 
-	return nil, validateK0sControlPlane(newKCP)
+	return validateK0sControlPlane(newKCP)
 }
 
 // ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type K0sControlPlane.
@@ -84,17 +84,28 @@ func (v *K0sControlPlaneValidator) ValidateDelete(_ context.Context, _ runtime.O
 	return nil, nil
 }
 
-func validateK0sControlPlane(kcp *v1beta1.K0sControlPlane) error {
+func validateK0sControlPlane(kcp *v1beta1.K0sControlPlane) (admission.Warnings, error) {
+	var warnings admission.Warnings
 	if err := denyUncompatibleK0sVersions(kcp); err != nil {
-		return err
+		return nil, err
 	}
 
 	// nolint:revive
 	if err := denyRecreateOnSingleClusters(kcp); err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	kcpVersion, err := version.NewVersion(kcp.Spec.Version)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse Kubernetes version: %v", err)
+	}
+
+	k0sVersion, includeK0sVersion := kcpVersion.K0s()
+	if includeK0sVersion {
+		warnings = append(warnings, fmt.Sprintf("K0sControlPlane %s includes a K0s version k0s.%d, which is deprecated. Please use the 'k0sVersion' field to specify the desired k0s version instead.", kcp.GetName(), k0sVersion))
+	}
+
+	return warnings, nil
 }
 
 func denyUncompatibleK0sVersions(kcp *v1beta1.K0sControlPlane) error {
@@ -106,7 +117,7 @@ func denyUncompatibleK0sVersions(kcp *v1beta1.K0sControlPlane) error {
 		return fmt.Errorf("failed to parse version: %v", err)
 	}
 
-	if vv, ok := uncomaptibleVersions[v.Core().String()]; ok {
+	if vv, ok := uncomaptibleVersions[v.Base()]; ok {
 		return fmt.Errorf("version %s is not compatible with K0sControlPlane, use %s", kcp.Spec.Version, vv)
 	}
 

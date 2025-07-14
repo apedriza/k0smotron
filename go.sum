@@ -189,8 +189,6 @@ github.com/hashicorp/go-cleanhttp v0.5.2/go.mod h1:kO/YDlP8L1346E6Sodw+PrpBSV4/S
 github.com/hashicorp/go-uuid v1.0.2/go.mod h1:6SBZvOh/SIDV7/2o3Jml5SYk/TvGqwFJ/bN7x4byOro=
 github.com/hashicorp/go-uuid v1.0.3 h1:2gKiV6YVmrJ1i2CKKa9obLvRieoRGviZFL26PcT/Co8=
 github.com/hashicorp/go-uuid v1.0.3/go.mod h1:6SBZvOh/SIDV7/2o3Jml5SYk/TvGqwFJ/bN7x4byOro=
-github.com/hashicorp/go-version v1.6.0 h1:feTTfFNnjP967rlCxM/I9g701jU+RN74YKx2mOkIeek=
-github.com/hashicorp/go-version v1.6.0/go.mod h1:fltr4n8CU8Ke44wwGCBoEymUuxUHl09ZGVZPK5anwXA=
 github.com/hashicorp/hcl v1.0.0 h1:0Anlzjpi4vEasTeNFn2mLJgTSwt0+6sfsiTG8qcWGx4=
 github.com/hashicorp/hcl v1.0.0/go.mod h1:E5yfLk+7swimpb2L/Alb/PJmXilQ/rhwaUYs4T20WEQ=
 github.com/huandu/xstrings v1.3.3/go.mod h1:y5/lhBue+AyNmUVz9RLU9xbLR0o4KIIExikq4ovT0aE=
@@ -226,8 +224,8 @@ github.com/k0sproject/k0s v1.27.2-0.20230504131248-94378e521a29 h1:a+SBzZ2S5LCbf
 github.com/k0sproject/k0s v1.27.2-0.20230504131248-94378e521a29/go.mod h1:oD35DgMlQxZynZlZ/nJpvI1Vj3ru4EaCWHRY4im007o=
 github.com/k0sproject/rig/v2 v2.0.0-alpha.3 h1:LxzxB7JXtTH1Z+a3IjkCfg8lkuv1IeYnZRhHLI2/y3M=
 github.com/k0sproject/rig/v2 v2.0.0-alpha.3/go.mod h1:RDUbv6bIL2lMF+cEBD8fon2OfUa4pZ4PodHvcjVrknE=
-github.com/k0sproject/version v0.6.0 h1:Wi8wu9j+H36+okIQA47o/YHbzNpKeIYj8IjGdJOdqsI=
-github.com/k0sproject/version v0.6.0/go.mod h1:5/7Js62gDCLBP6mEs0mUcYEEkYneM5qXDKN/hyFlQTM=
+github.com/k0sproject/version v0.7.0 h1:pWp60UaA7N9g/wKUz1HN6heFW1M6ioWHEo8glHYlq00=
+github.com/k0sproject/version v0.7.0/go.mod h1:iNV3O8blndsQhxZ8zACfpQhrLDlrTvDlCzx+vgCFtSI=
 github.com/kisielk/errcheck v1.5.0/go.mod h1:pFxgyoBC7bSaBwPgfKdkLd5X25qrDl4LWUI2bnpBCr8=
 github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=
 github.com/konsorten/go-windows-terminal-sequences v1.0.1/go.mod h1:T0+1ngSBFLxvqU3pZ+m/2kptfBszLMUkC4ZK/EgS/cQ=
