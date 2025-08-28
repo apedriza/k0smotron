@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -46,8 +47,8 @@ import (
 	"github.com/go-logr/logr"
 	bootstrapv1 "github.com/k0sproject/k0smotron/api/bootstrap/v1beta1"
 	cpv1beta1 "github.com/k0sproject/k0smotron/api/controlplane/v1beta1"
-	"github.com/k0sproject/k0smotron/internal/cloudinit"
 	"github.com/k0sproject/k0smotron/internal/controller/util"
+	"github.com/k0sproject/k0smotron/internal/provisioner"
 	kutil "github.com/k0sproject/k0smotron/internal/util"
 )
 
@@ -228,7 +229,7 @@ func (r *Controller) generateBootstrapDataForWorker(ctx context.Context, log log
 		return nil, err
 	}
 
-	files := []cloudinit.File{
+	files := []provisioner.File{
 		{
 			Path:        "/etc/k0s.token",
 			Permissions: "0644",
@@ -242,7 +243,9 @@ func (r *Controller) generateBootstrapDataForWorker(ctx context.Context, log log
 	}
 	files = append(files, resolvedFiles...)
 
-	downloadCommands := util.DownloadCommands(scope.Config.Spec.PreInstalledK0s, scope.Config.Spec.DownloadURL, scope.Config.Spec.Version)
+	files = append(files, util.GetDownloadK0sBinaryScript())
+
+	downloadCommands := util.DownloadCommands(scope.Config.Spec.PreInstalledK0s, scope.Config.Spec.DownloadURL, scope.Config.Spec.Version, scope.Config.Spec.K0sInstallDir)
 	installCmd := createInstallCmd(scope)
 
 	startCmd := `(command -v systemctl > /dev/null 2>&1 && systemctl start k0sworker) || ` + // systemd
@@ -258,20 +261,27 @@ func (r *Controller) generateBootstrapDataForWorker(ctx context.Context, log log
 	// https://cluster-api.sigs.k8s.io/developer/providers/contracts/bootstrap-config#sentinel-file
 	commands = append(commands, "mkdir -p /run/cluster-api && touch /run/cluster-api/bootstrap-success.complete")
 
-	ci := &cloudinit.CloudInit{
-		Files:   files,
-		RunCmds: commands,
-	}
-
+	var customUserData string
 	if scope.Config.Spec.CustomUserDataRef != nil {
-		customCloudInit, err := resolveContentFromFile(ctx, r.Client, scope.Cluster, scope.Config.Spec.CustomUserDataRef)
+		customUserData, err = resolveContentFromFile(ctx, r.Client, scope.Cluster, scope.Config.Spec.CustomUserDataRef)
 		if err != nil {
 			return nil, fmt.Errorf("error extracting the contents of the provided custom worker user data: %w", err)
 		}
-		ci.CustomCloudInit = customCloudInit
 	}
 
-	return ci.AsBytes()
+	var p provisioner.Provisioner = &provisioner.CloudInitProvisioner{}
+	if scope.Config.Spec.Ignition != nil {
+		p = &provisioner.IgnitionProvisioner{
+			Variant: scope.Config.Spec.Ignition.Variant,
+			Version: scope.Config.Spec.Ignition.Version,
+		}
+	}
+
+	return p.ToProvisionData(&provisioner.InputProvisionData{
+		Files:          files,
+		Commands:       commands,
+		CustomUserData: customUserData,
+	})
 }
 
 func (r *Controller) getK0sToken(ctx context.Context, scope *Scope) (string, error) {
@@ -414,8 +424,9 @@ func (r *Controller) setClientScope(ctx context.Context, cluster *clusterv1.Clus
 }
 
 func createInstallCmd(scope *Scope) string {
+	k0sPath := filepath.Join(scope.Config.Spec.K0sInstallDir, "k0s")
 	installCmd := []string{
-		"k0s install worker --token-file /etc/k0s.token",
+		fmt.Sprintf("%s install worker --token-file /etc/k0s.token", k0sPath),
 	}
 	installCmd = append(installCmd, mergeExtraArgs(scope.Config.Spec.Args, scope.ConfigOwner, true, scope.Config.Spec.UseSystemHostname)...)
 	return strings.Join(installCmd, " ")

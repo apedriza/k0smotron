@@ -65,7 +65,7 @@ func Test_createDownloadCommands(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, DownloadCommands(tt.preInstalledK0s, tt.url, tt.version))
+			require.Equal(t, tt.want, DownloadCommands(tt.preInstalledK0s, tt.url, tt.version, ""))
 		})
 	}
 }
