@@ -15,7 +15,7 @@ ENVTEST ?= $(LOCALBIN)/setup-envtest
 CRDOC ?= $(LOCALBIN)/crdoc
 
 ## e2e configuration
-E2E_CONF_FILE ?= $(shell pwd)/e2e/config/docker.yaml
+E2E_CONF_FILE ?= $(shell pwd)/e2e/config.yaml
 SKIP_RESOURCE_CLEANUP ?= false
 # Artifacts folder generated for e2e tests
 ARTIFACTS ?= $(shell pwd)/_artifacts
@@ -124,7 +124,8 @@ generate-e2e-templates-main: $(KUSTOMIZE)
 	$(KUSTOMIZE) build $(DOCKER_TEMPLATES)/main/cluster-template-webhook-recreate-in-single-mode --load-restrictor LoadRestrictionsNone > $(DOCKER_TEMPLATES)/main/cluster-template-webhook-recreate-in-single-mode.yaml
 	$(KUSTOMIZE) build $(DOCKER_TEMPLATES)/main/cluster-template-webhook-k0s-not-compatible --load-restrictor LoadRestrictionsNone > $(DOCKER_TEMPLATES)/main/cluster-template-webhook-k0s-not-compatible.yaml
 	$(KUSTOMIZE) build $(DOCKER_TEMPLATES)/main/cluster-template-machinedeployment --load-restrictor LoadRestrictionsNone > $(DOCKER_TEMPLATES)/main/cluster-template-machinedeployment.yaml
-	$(KUSTOMIZE) build $(DOCKER_TEMPLATES)/main/cluster-template-remote-hcp --load-restrictor LoadRestrictionsNone > $(DOCKER_TEMPLATES)/main/cluster-template-remote-hcp.yaml
+	$(KUSTOMIZE) build $(DOCKER_TEMPLATES)/main/cluster-template-federated-hcp --load-restrictor LoadRestrictionsNone > $(DOCKER_TEMPLATES)/main/cluster-template-federated-hcp.yaml
+
 
 
 e2e: generate-e2e-templates-main

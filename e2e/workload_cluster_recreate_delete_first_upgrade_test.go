@@ -26,7 +26,6 @@ import (
 
 	"github.com/k0sproject/k0smotron/e2e/util"
 	"github.com/stretchr/testify/require"
-	"k8s.io/utils/ptr"
 	capiframework "sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	capiutil "sigs.k8s.io/cluster-api/util"
@@ -47,7 +46,7 @@ func TestWorkloadClusterRecreateDeleteFirstUpgrade(t *testing.T) {
 //
 // 3. Performing a subsequent control plane version upgrade using Inplace upgrade strategy.
 //   - Confirms the cluster status is consistent and desired post-update.
-func workloadClusterRecreateDeleteFirstUpgradeSpec(t *testing.T) {
+func workloadClusterRecreateDeleteFirstUpgradeSpec(t *testing.T, input specInput) {
 	testName := "workload-recreate-delete-first-upgrade"
 
 	// Setup a Namespace where to host objects for this spec and create a watcher for the namespace events.
@@ -56,18 +55,16 @@ func workloadClusterRecreateDeleteFirstUpgradeSpec(t *testing.T) {
 	clusterName := fmt.Sprintf("%s-%s", testName, capiutil.RandomString(6))
 
 	workloadClusterTemplate := clusterctl.ConfigCluster(ctx, clusterctl.ConfigClusterInput{
-		ClusterctlConfigPath: clusterctlConfigPath,
-		KubeconfigPath:       bootstrapClusterProxy.GetKubeconfigPath(),
-		// no flavor specified, so it will use the default one "cluster-template"
-		Flavor: "",
-
+		ClusterctlConfigPath:     clusterctlConfigPath,
+		KubeconfigPath:           bootstrapClusterProxy.GetKubeconfigPath(),
+		Flavor:                   input.flavor,
 		Namespace:                namespace.Name,
 		ClusterName:              clusterName,
 		KubernetesVersion:        e2eConfig.MustGetVariable(KubernetesVersion),
-		ControlPlaneMachineCount: ptr.To[int64](3),
-		// TODO: make infra provider configurable
-		InfrastructureProvider: "docker",
-		LogFolder:              filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
+		ControlPlaneMachineCount: &input.controlPlaneMachineCount,
+		WorkerMachineCount:       &input.workerMachineCount,
+		InfrastructureProvider:   input.infraProvider,
+		LogFolder:                filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
 		ClusterctlVariables: map[string]string{
 			"CLUSTER_NAME":    clusterName,
 			"NAMESPACE":       namespace.Name,

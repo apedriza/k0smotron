@@ -26,7 +26,6 @@ import (
 
 	"github.com/k0sproject/k0smotron/e2e/util"
 	"github.com/stretchr/testify/require"
-	"k8s.io/utils/ptr"
 	capiframework "sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	capiutil "sigs.k8s.io/cluster-api/util"
@@ -47,7 +46,7 @@ func TestWorkloadClusterInplaceUpgrade(t *testing.T) {
 //
 // 3. Performing a subsequent control plane version upgrade using Inplace upgrade strategy.
 //   - Confirms the cluster status is consistent and desired post-update.
-func workloadClusterInplaceUpgradeSpec(t *testing.T) {
+func workloadClusterInplaceUpgradeSpec(t *testing.T, input specInput) {
 	testName := "workload-inplace-upgrade"
 
 	// Setup a Namespace where to host objects for this spec and create a watcher for the namespace events.
@@ -55,26 +54,31 @@ func workloadClusterInplaceUpgradeSpec(t *testing.T) {
 
 	clusterName := fmt.Sprintf("%s-%s", testName, capiutil.RandomString(6))
 
-	workloadClusterTemplate := clusterctl.ConfigCluster(ctx, clusterctl.ConfigClusterInput{
-		ClusterctlConfigPath: clusterctlConfigPath,
-		KubeconfigPath:       bootstrapClusterProxy.GetKubeconfigPath(),
-		// no flavor specified, so it will use the default one "cluster-template"
-		Flavor: "",
+	clusterctlVariables := map[string]string{
+		"CLUSTER_NAME":    clusterName,
+		"NAMESPACE":       namespace.Name,
+		"UPDATE_STRATEGY": "InPlace",
+	}
+	for k, v := range input.customClusterctlVariables {
+		clusterctlVariables[k] = v
+	}
 
+	workloadClusterTemplate := clusterctl.ConfigCluster(ctx, clusterctl.ConfigClusterInput{
+		ClusterctlConfigPath:     clusterctlConfigPath,
+		KubeconfigPath:           bootstrapClusterProxy.GetKubeconfigPath(),
+		Flavor:                   input.flavor,
 		Namespace:                namespace.Name,
 		ClusterName:              clusterName,
 		KubernetesVersion:        e2eConfig.MustGetVariable(KubernetesVersion),
-		ControlPlaneMachineCount: ptr.To[int64](3),
-		// TODO: make infra provider configurable
-		InfrastructureProvider: "docker",
-		LogFolder:              filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
-		ClusterctlVariables: map[string]string{
-			"CLUSTER_NAME":    clusterName,
-			"NAMESPACE":       namespace.Name,
-			"UPDATE_STRATEGY": "InPlace",
-		},
+		ControlPlaneMachineCount: &input.controlPlaneMachineCount,
+		WorkerMachineCount:       &input.workerMachineCount,
+		InfrastructureProvider:   input.infraProvider,
+		LogFolder:                filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
+		ClusterctlVariables:      clusterctlVariables,
 	})
 	require.NotNil(t, workloadClusterTemplate)
+
+	fmt.Println(string(workloadClusterTemplate))
 
 	require.Eventually(t, func() bool {
 		return bootstrapClusterProxy.CreateOrUpdate(ctx, workloadClusterTemplate) == nil

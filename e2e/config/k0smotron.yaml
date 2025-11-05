@@ -21,18 +21,19 @@ providers:
         replacements:
           - old: "imagePullPolicy: Always"
             new: "imagePullPolicy: IfNotPresent"
-  - name: docker
+  - name: k0sproject-k0smotron
     type: InfrastructureProvider
     versions:
-      - name: "{go://sigs.k8s.io/cluster-api@v1.10}"
-        value: https://github.com/kubernetes-sigs/cluster-api/releases/download/{go://sigs.k8s.io/cluster-api@v1.10}/infrastructure-components-development.yaml
-        type: url
+      - name: v1.9.99 # potentially next release. Manifest from source files (development) are used.
+        value: ../../config/default
         contract: v1beta1
         files:
-          - sourcePath: "../data/shared/v1beta1/metadata.yaml"
+          - sourcePath: "../../metadata.yaml"
         replacements:
           - old: "imagePullPolicy: Always"
             new: "imagePullPolicy: IfNotPresent"
+          - old: "image: k0s/k0smotron:latest"
+            new: "image: quay.io/k0sproject/k0smotron:latest" # For local testing, this image needs to be built before run e2e by using `make docker-build`
     files:
       - sourcePath: "../data/infrastructure-docker/main/cluster-template.yaml"
       - sourcePath: "../data/infrastructure-docker/main/cluster-template-kcp-remediation.yaml"

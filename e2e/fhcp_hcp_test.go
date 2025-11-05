@@ -32,7 +32,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/cluster-api/test/framework"
 	capiframework "sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/bootstrap"
@@ -56,16 +55,16 @@ var (
 	hostingClusterProxy capiframework.ClusterProxy
 )
 
-func TestRemoteHostedControlPlanes(t *testing.T) {
+func TestFederatedHostedControlPlanes(t *testing.T) {
 	deployHostingCluster()
 	// TODO: dump logs from controlplanes pods before deleting the cluster.
 	defer deleteHostingcluster()
 
-	setupAndRun(t, remoteHCPSpec)
+	setupAndRun(t, federatedHCPSpec)
 }
 
-func remoteHCPSpec(t *testing.T) {
-	testName := "remote-hcp"
+func federatedHCPSpec(t *testing.T, input specInput) {
+	testName := "federated-hcp"
 
 	encodedHostingClusterKubeconfig, err := getEncodedHostingClusterKubeconfig()
 	require.NoError(t, err)
@@ -84,18 +83,16 @@ func remoteHCPSpec(t *testing.T) {
 	clusterName := fmt.Sprintf("%s-%s", testName, capiutil.RandomString(6))
 
 	workloadClusterTemplate := clusterctl.ConfigCluster(ctx, clusterctl.ConfigClusterInput{
-		ClusterctlConfigPath: clusterctlConfigPath,
-		KubeconfigPath:       bootstrapClusterProxy.GetKubeconfigPath(),
-		// select cluster templates
-		Flavor: "remote-hcp",
-
+		ClusterctlConfigPath:     clusterctlConfigPath,
+		KubeconfigPath:           bootstrapClusterProxy.GetKubeconfigPath(),
+		Flavor:                   "federated-hcp",
 		Namespace:                namespace.Name,
 		ClusterName:              clusterName,
 		KubernetesVersion:        e2eConfig.MustGetVariable(KubernetesVersion),
-		ControlPlaneMachineCount: ptr.To[int64](3),
-		// TODO: make infra provider configurable
-		InfrastructureProvider: "docker",
-		LogFolder:              filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
+		ControlPlaneMachineCount: &input.controlPlaneMachineCount,
+		WorkerMachineCount:       &input.workerMachineCount,
+		InfrastructureProvider:   input.infraProvider,
+		LogFolder:                filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
 		ClusterctlVariables: map[string]string{
 			"CLUSTER_NAME":               clusterName,
 			"NAMESPACE":                  namespace.Name,

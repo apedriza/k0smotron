@@ -26,7 +26,6 @@ import (
 
 	"github.com/k0sproject/k0smotron/e2e/util"
 	"github.com/stretchr/testify/require"
-	"k8s.io/utils/ptr"
 	capiframework "sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	capiutil "sigs.k8s.io/cluster-api/util"
@@ -37,7 +36,7 @@ func TestIgnitionProvisioning(t *testing.T) {
 }
 
 // Validation of the correct operation of k0smotron when using Ignition provisioning.
-func ignitionProvisioningSpec(t *testing.T) {
+func ignitionProvisioningSpec(t *testing.T, input specInput) {
 	testName := "ignition"
 
 	// Setup a Namespace where to host objects for this spec and create a watcher for the namespace events.
@@ -52,14 +51,14 @@ func ignitionProvisioningSpec(t *testing.T) {
 	}
 
 	workloadClusterTemplate := clusterctl.ConfigCluster(ctx, clusterctl.ConfigClusterInput{
-		ClusterctlConfigPath: clusterctlConfigPath,
-		KubeconfigPath:       bootstrapClusterProxy.GetKubeconfigPath(),
-		Flavor:               "ignition",
-
+		ClusterctlConfigPath:     clusterctlConfigPath,
+		KubeconfigPath:           bootstrapClusterProxy.GetKubeconfigPath(),
+		Flavor:                   "ignition",
 		Namespace:                namespace.Name,
 		ClusterName:              clusterName,
 		KubernetesVersion:        e2eConfig.MustGetVariable(KubernetesVersion),
-		ControlPlaneMachineCount: ptr.To[int64](3),
+		ControlPlaneMachineCount: &input.controlPlaneMachineCount,
+		WorkerMachineCount:       &input.workerMachineCount,
 		// CAPD doesn't support ignition, so we use AWS as infrastructure provider
 		InfrastructureProvider: "aws",
 		LogFolder:              filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),

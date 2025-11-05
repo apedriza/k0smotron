@@ -25,7 +25,6 @@ import (
 
 	"github.com/k0sproject/k0smotron/e2e/util"
 	"github.com/stretchr/testify/require"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	capiutil "sigs.k8s.io/cluster-api/util"
 )
@@ -38,7 +37,7 @@ func TestAdmissionWebhookK0sVersionNotCompatible(t *testing.T) {
 	setupAndRun(t, admissionWebhookK0sVersionNotCompatibleSpec)
 }
 
-func admissionWebhookRecreateStrategyInSingleModeSpec(t *testing.T) {
+func admissionWebhookRecreateStrategyInSingleModeSpec(t *testing.T, input specInput) {
 	testName := "admission-webhook-recreate-single-mode"
 
 	// Setup a Namespace where to host objects for this spec and create a watcher for the namespace events.
@@ -47,18 +46,16 @@ func admissionWebhookRecreateStrategyInSingleModeSpec(t *testing.T) {
 	clusterName := fmt.Sprintf("%s-%s", testName, capiutil.RandomString(6))
 
 	workloadClusterTemplate := clusterctl.ConfigCluster(ctx, clusterctl.ConfigClusterInput{
-		ClusterctlConfigPath: clusterctlConfigPath,
-		KubeconfigPath:       bootstrapClusterProxy.GetKubeconfigPath(),
-		// select cluster templates
-		Flavor: "webhook-recreate-in-single-mode",
-
+		ClusterctlConfigPath:     clusterctlConfigPath,
+		KubeconfigPath:           bootstrapClusterProxy.GetKubeconfigPath(),
+		Flavor:                   "webhook-recreate-in-single-mode",
 		Namespace:                namespace.Name,
 		ClusterName:              clusterName,
 		KubernetesVersion:        e2eConfig.MustGetVariable(KubernetesVersion),
-		ControlPlaneMachineCount: ptr.To[int64](3),
-		// TODO: make infra provider configurable
-		InfrastructureProvider: "docker",
-		LogFolder:              filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
+		ControlPlaneMachineCount: &input.controlPlaneMachineCount,
+		WorkerMachineCount:       &input.workerMachineCount,
+		InfrastructureProvider:   input.infraProvider,
+		LogFolder:                filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
 		ClusterctlVariables: map[string]string{
 			"CLUSTER_NAME": clusterName,
 			"NAMESPACE":    namespace.Name,
@@ -71,7 +68,7 @@ func admissionWebhookRecreateStrategyInSingleModeSpec(t *testing.T) {
 	require.Contains(t, err.Error(), "UpdateStrategy Recreate strategy is not allowed when the cluster is running in single mode")
 }
 
-func admissionWebhookK0sVersionNotCompatibleSpec(t *testing.T) {
+func admissionWebhookK0sVersionNotCompatibleSpec(t *testing.T, input specInput) {
 	testName := "admission-webhook-k0s-not-compatible"
 
 	// Setup a Namespace where to host objects for this spec and create a watcher for the namespace events.
@@ -80,18 +77,16 @@ func admissionWebhookK0sVersionNotCompatibleSpec(t *testing.T) {
 	clusterName := fmt.Sprintf("%s-%s", testName, capiutil.RandomString(6))
 
 	workloadClusterTemplate := clusterctl.ConfigCluster(ctx, clusterctl.ConfigClusterInput{
-		ClusterctlConfigPath: clusterctlConfigPath,
-		KubeconfigPath:       bootstrapClusterProxy.GetKubeconfigPath(),
-		// select cluster templates
-		Flavor: "webhook-k0s-not-compatible",
-
+		ClusterctlConfigPath:     clusterctlConfigPath,
+		KubeconfigPath:           bootstrapClusterProxy.GetKubeconfigPath(),
+		Flavor:                   "webhook-k0s-not-compatible",
 		Namespace:                namespace.Name,
 		ClusterName:              clusterName,
 		KubernetesVersion:        e2eConfig.MustGetVariable(KubernetesVersion),
-		ControlPlaneMachineCount: ptr.To[int64](3),
-		// TODO: make infra provider configurable
-		InfrastructureProvider: "docker",
-		LogFolder:              filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
+		ControlPlaneMachineCount: &input.controlPlaneMachineCount,
+		WorkerMachineCount:       &input.workerMachineCount,
+		InfrastructureProvider:   input.infraProvider,
+		LogFolder:                filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
 		ClusterctlVariables: map[string]string{
 			"CLUSTER_NAME":    clusterName,
 			"NAMESPACE":       namespace.Name,

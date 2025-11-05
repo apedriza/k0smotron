@@ -29,7 +29,6 @@ import (
 	"github.com/k0sproject/k0smotron/internal/util"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/cluster-api/test/framework"
 	capiframework "sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
@@ -41,7 +40,7 @@ func TestControlplaneConditions(t *testing.T) {
 	setupAndRun(t, controlplaneConditionsSpec)
 }
 
-func controlplaneConditionsSpec(t *testing.T) {
+func controlplaneConditionsSpec(t *testing.T, input specInput) {
 	testName := "kcp-conditions"
 
 	// Setup a Namespace where to host objects for this spec and create a watcher for the namespace events.
@@ -58,12 +57,13 @@ func controlplaneConditionsSpec(t *testing.T) {
 	workloadClusterTemplate := clusterctl.ConfigCluster(ctx, clusterctl.ConfigClusterInput{
 		ClusterctlConfigPath:     clusterctlConfigPath,
 		KubeconfigPath:           bootstrapClusterProxy.GetKubeconfigPath(),
-		InfrastructureProvider:   "docker",
-		Flavor:                   "",
+		InfrastructureProvider:   input.infraProvider,
+		Flavor:                   input.flavor,
 		Namespace:                workloadClusterNamespace,
 		ClusterName:              workloadClusterName,
 		KubernetesVersion:        e2eConfig.MustGetVariable(KubernetesVersion),
-		ControlPlaneMachineCount: ptr.To[int64](1),
+		ControlPlaneMachineCount: &input.controlPlaneMachineCount,
+		WorkerMachineCount:       &input.workerMachineCount,
 		LogFolder:                filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
 		ClusterctlVariables: map[string]string{
 			"CLUSTER_NAME":    workloadClusterName,

@@ -36,6 +36,7 @@ import (
 	cpv1beta1 "github.com/k0sproject/k0smotron/api/controlplane/v1beta1"
 	"github.com/k0sproject/k0smotron/e2e/mothership"
 	"github.com/k0sproject/k0smotron/e2e/util"
+	"github.com/k0sproject/k0smotron/e2e/util/poolprovisioner"
 	"sigs.k8s.io/cluster-api/test/framework"
 	capiframework "sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/bootstrap"
@@ -52,6 +53,8 @@ const (
 	ControlPlaneMachineCount         = "CONTROL_PLANE_MACHINE_COUNT"
 	IPFamily                         = "IP_FAMILY"
 	SSHPublicKey                     = "SSH_PUBLIC_KEY"
+	RemoteMachineProvisioner         = "REMOTE_MACHINE_PROVISIONER"
+	PoolProvisioner                  = "POOL_PROVISIONER"
 )
 
 var (
@@ -88,6 +91,21 @@ var (
 
 	// managementClusterProxy allows to interact with the management cluster to be used for the e2e tests.
 	bootstrapClusterProxy capiframework.ClusterProxy
+
+	// infraProvider is the infrastructure provider to be used for the tests. Default is "docker".
+	infraProvider string
+
+	// flavor is the flavor to be used for the cluster templates.
+	flavor string
+
+	// controlPlaneMachineCount is the number of control plane machines.
+	controlPlaneMachineCount int64
+
+	// workerMachineCount is the number of worker machines.
+	workerMachineCount int64
+
+	// customClusterctlVariables allows to pass custom variables to clusterctl when creating clusters.
+	customClusterctlVariables map[string]string
 )
 
 func init() {
@@ -96,6 +114,10 @@ func init() {
 	flag.BoolVar(&skipCleanup, "skip-resource-cleanup", false, "if true, the resource cleanup after tests will be skipped")
 	flag.StringVar(&artifactFolder, "artifacts-folder", "", "folder where e2e test artifact should be stored")
 	flag.BoolVar(&useExistingCluster, "use-existing-cluster", false, "if true, the test uses the current cluster instead of creating a new one (default discovery rules apply)")
+	flag.StringVar(&infraProvider, "infra-provider", "docker", "infrastructure provider to be used for the tests")
+	flag.StringVar(&flavor, "flavor", "", "the flavor to be used for the cluster templates")
+	flag.Int64Var(&controlPlaneMachineCount, "control-plane-machine-count", 3, "the number of control plane machines")
+	flag.Int64Var(&workerMachineCount, "worker-machine-count", 0, "the number of worker machines")
 
 	// On the k0smotron side we avoid using Gomega for assertions but since we want to use the
 	// cluster-api framework as much as possible, the framework assertions require registering
@@ -105,13 +127,28 @@ func init() {
 	})
 }
 
-func setupAndRun(t *testing.T, test func(t *testing.T)) {
+type specInput struct {
+	infraProvider             string
+	flavor                    string
+	controlPlaneMachineCount  int64
+	workerMachineCount        int64
+	customClusterctlVariables map[string]string
+}
+
+func setupAndRun(t *testing.T, test func(t *testing.T, input specInput)) {
 	ctrl.SetLogger(klog.Background())
 	flag.Parse()
 
 	defer func() {
 		if !skipCleanup {
 			tearDown(bootstrapClusterProvider, bootstrapClusterProxy)
+
+			// if infraProvider == "k0sproject-k0smotron" {
+			// 	err := poolprovisioner.GetProvisioner().Clean(ctx)
+			// 	if err != nil {
+			// 		fmt.Printf("Failed to clean machine pool: %v\n", err)
+			// 	}
+			// }
 		}
 	}()
 	err := setupMothership()
@@ -119,7 +156,39 @@ func setupAndRun(t *testing.T, test func(t *testing.T)) {
 		panic(err)
 	}
 
-	test(t)
+	input := specInput{
+		infraProvider:             infraProvider,
+		flavor:                    flavor,
+		controlPlaneMachineCount:  controlPlaneMachineCount,
+		workerMachineCount:        workerMachineCount,
+		customClusterctlVariables: map[string]string{},
+	}
+
+	// If using k0smotron as infra provider, create a virtual machine pool for the infrastructure to be used
+	// for the remote machines.
+	if infraProvider == "k0sproject-k0smotron" {
+		if input.flavor == "" {
+			// Default flavor for k0sproject-k0smotron infrastructure provider is "ssh"
+			input.flavor = "ssh"
+		}
+
+		pooledMachines, err := createMachinePool(ctx, controlPlaneMachineCount+workerMachineCount, "v1.32.0")
+		if err != nil {
+			panic(fmt.Errorf("failed to create machine pool: %w", err))
+		}
+
+		machinesPoolTemplate, err := generateMachinePoolTemplate(pooledMachines)
+		if err != nil {
+			panic(fmt.Errorf("failed to create machine pool template: %w", err))
+		}
+
+		// append template to the template used for the tests
+		// maybe pool machine variable is not needed.
+
+		input.customClusterctlVariables["POOL_MACHINES"] = string(machinesPoolTemplate)
+	}
+
+	test(t, input)
 }
 
 func setupMothership() error {
@@ -180,6 +249,42 @@ func setupMothership() error {
 	}
 
 	return nil
+}
+
+func createMachinePool(ctx context.Context, replicas int64, nodeVersion string) ([]poolprovisioner.PooledMachine, error) {
+	var pp poolprovisioner.Provisioner
+	switch os.Getenv(PoolProvisioner) {
+	case "docker", "":
+		pp = &poolprovisioner.DockerProvisioner{}
+	// TODO: add AWS as provisioner
+	default:
+		return nil, fmt.Errorf("unknown pool provisioner: %s", os.Getenv(PoolProvisioner))
+	}
+
+	return pp.Provision(ctx, int(replicas), nodeVersion)
+}
+
+func generateMachinePoolTemplate(pooledMachines []poolprovisioner.PooledMachine) ([]byte, error) {
+	poolMachineTemplate := `apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: PooledRemoteMachine
+metadata:
+  name: ${CLUSTER_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  pool: default
+  machine:
+	address: %s
+	port: 22
+	user: root
+	sshKeyRef:
+	  name: %s
+`
+	pooledMachinesStrings := []string{}
+	for _, pm := range pooledMachines {
+		pooledMachinesStrings = append(pooledMachinesStrings, fmt.Sprintf(poolMachineTemplate, pm.IP, pm.SSHKeyRef))
+	}
+
+	return nil, nil
 }
 
 func tearDown(bootstrapClusterProvider bootstrap.ClusterProvider, bootstrapClusterProxy framework.ClusterProxy) {

@@ -29,7 +29,6 @@ import (
 	e2eutil "github.com/k0sproject/k0smotron/e2e/util"
 	"github.com/k0sproject/k0smotron/internal/util"
 	"github.com/stretchr/testify/require"
-	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/test/framework"
 	capiframework "sigs.k8s.io/cluster-api/test/framework"
@@ -51,7 +50,7 @@ func TestK0smotronUpgrade(t *testing.T) {
 // development version against the latests stable version of k0smotron.
 var k0smotronMinorVersionsToCheckUpgrades = []string{"1.5", "1.6", "1.7", "1.8"}
 
-func k0smotronUpgradeSpec(t *testing.T) {
+func k0smotronUpgradeSpec(t *testing.T, input specInput) {
 
 	testName := "k0smotron-upgrade"
 
@@ -96,7 +95,7 @@ func k0smotronUpgradeSpec(t *testing.T) {
 
 	fmt.Println("THE MANAGEMENT CLUSTER WITH THE OLDER VERSION OF K0SMOTRON PROVIDERS IS UP&RUNNING!")
 
-	fmt.Println(fmt.Sprintf("Creating a namespace for hosting the %s test workload cluster", testName))
+	fmt.Printf("Creating a namespace for hosting the %s test workload cluster\n", testName)
 
 	testNamespace, testCancelWatches := framework.CreateNamespaceAndWatchEvents(ctx, framework.CreateNamespaceAndWatchEventsInput{
 		Creator:   managementClusterProxy.GetClient(),
@@ -112,19 +111,16 @@ func k0smotronUpgradeSpec(t *testing.T) {
 
 	fmt.Println("Getting the cluster template yaml")
 	workloadClusterTemplate := clusterctl.ConfigCluster(ctx, clusterctl.ConfigClusterInput{
-		ClusterctlConfigPath: clusterctlConfigPath,
-		KubeconfigPath:       managementClusterProxy.GetKubeconfigPath(),
-		// no flavor specified, so it will use the default one "cluster-template"
-		Flavor: "",
-
-		Namespace:         workloadClusterNamespace,
-		ClusterName:       workloadClusterName,
-		KubernetesVersion: e2eConfig.MustGetVariable(KubernetesVersion),
-		// TODO: make replicas value configurable
-		ControlPlaneMachineCount: ptr.To[int64](3),
-		// TODO: make infra provider configurable
-		InfrastructureProvider: "docker",
-		LogFolder:              filepath.Join(artifactFolder, "clusters", managementClusterProxy.GetName()),
+		ClusterctlConfigPath:     clusterctlConfigPath,
+		KubeconfigPath:           managementClusterProxy.GetKubeconfigPath(),
+		Flavor:                   input.flavor,
+		Namespace:                workloadClusterNamespace,
+		ClusterName:              workloadClusterName,
+		KubernetesVersion:        e2eConfig.MustGetVariable(KubernetesVersion),
+		ControlPlaneMachineCount: &input.controlPlaneMachineCount,
+		WorkerMachineCount:       &input.workerMachineCount,
+		InfrastructureProvider:   input.infraProvider,
+		LogFolder:                filepath.Join(artifactFolder, "clusters", managementClusterProxy.GetName()),
 		ClusterctlVariables: map[string]string{
 			"CLUSTER_NAME":    workloadClusterName,
 			"NAMESPACE":       workloadClusterNamespace,
@@ -201,7 +197,7 @@ func k0smotronUpgradeSpec(t *testing.T) {
 		latestK0smotronStableMinor, _ := getStableReleaseOfMinor(context.Background(), minor)
 		k0smotronVersion := []string{fmt.Sprintf("k0sproject-k0smotron:v%s", latestK0smotronStableMinor)}
 
-		fmt.Println(fmt.Sprintf("Upgrading the management cluster to k0smotron %s", latestK0smotronStableMinor))
+		fmt.Printf("Upgrading the management cluster to k0smotron %s\n", latestK0smotronStableMinor)
 
 		mothership.UpgradeManagementClusterAndWait(ctx, clusterctl.UpgradeManagementClusterAndWaitInput{
 			ClusterctlConfigPath:  clusterctlConfigPath,
@@ -230,7 +226,7 @@ func k0smotronUpgradeSpec(t *testing.T) {
 
 		require.True(t, validateMachineRollout(preUpgradeMachineList, postUpgradeMachineList), "The machines in the workload cluster have been rolled out unexpectedly")
 
-		fmt.Println(fmt.Sprintf("THE MANAGEMENT CLUSTER WITH '%s' VERSION OF K0SMOTRON PROVIDERS WORKS!", latestK0smotronStableMinor))
+		fmt.Printf("THE MANAGEMENT CLUSTER WITH '%s' VERSION OF K0SMOTRON PROVIDERS WORKS!\n", latestK0smotronStableMinor)
 	}
 
 	fmt.Println("Upgrading the management cluster to development version of k0smotron")

@@ -54,7 +54,7 @@ func TestControlplaneRemediation(t *testing.T) {
 }
 
 // Verifies that K0sControlPlane controller properly remediates the Machines.
-func controlplaneRemediationSpec(t *testing.T) {
+func controlplaneRemediationSpec(t *testing.T, input specInput) {
 	testName := "kcp-remediation"
 
 	// Setup a Namespace where to host objects for this spec and create a watcher for the namespace events.
@@ -72,18 +72,16 @@ func controlplaneRemediationSpec(t *testing.T) {
 	require.NoError(t, err)
 
 	workloadClusterTemplate := clusterctl.ConfigCluster(ctx, clusterctl.ConfigClusterInput{
-		ClusterctlConfigPath: clusterctlConfigPath,
-		KubeconfigPath:       bootstrapClusterProxy.GetKubeconfigPath(),
-		// select cluster templates
-		Flavor: "kcp-remediation",
-
+		ClusterctlConfigPath:     clusterctlConfigPath,
+		KubeconfigPath:           bootstrapClusterProxy.GetKubeconfigPath(),
+		Flavor:                   "kcp-remediation",
 		Namespace:                namespace.Name,
 		ClusterName:              clusterName,
 		KubernetesVersion:        e2eConfig.MustGetVariable(KubernetesVersion),
-		ControlPlaneMachineCount: ptr.To[int64](3),
-		// TODO: make infra provider configurable
-		InfrastructureProvider: "docker",
-		LogFolder:              filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
+		ControlPlaneMachineCount: &input.controlPlaneMachineCount,
+		WorkerMachineCount:       &input.workerMachineCount,
+		InfrastructureProvider:   input.infraProvider,
+		LogFolder:                filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
 		ClusterctlVariables: map[string]string{
 			"CLUSTER_NAME": clusterName,
 			"NAMESPACE":    namespace.Name,

@@ -33,7 +33,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	capiframework "sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
@@ -42,7 +41,7 @@ import (
 )
 
 func TestMachinedeployment(t *testing.T) {
-	setupAndRun(t, func(t *testing.T) {
+	setupAndRun(t, func(t *testing.T, input specInput) {
 		testName := "machinedeployment"
 
 		// Setup a Namespace where to host objects for this spec and create a watcher for the namespace events.
@@ -51,18 +50,16 @@ func TestMachinedeployment(t *testing.T) {
 		clusterName := fmt.Sprintf("%s-%s", testName, capiutil.RandomString(6))
 
 		workloadClusterTemplate := clusterctl.ConfigCluster(ctx, clusterctl.ConfigClusterInput{
-			ClusterctlConfigPath: clusterctlConfigPath,
-			KubeconfigPath:       bootstrapClusterProxy.GetKubeconfigPath(),
-			// select cluster templates
-			Flavor: "machinedeployment",
-
+			ClusterctlConfigPath:     clusterctlConfigPath,
+			KubeconfigPath:           bootstrapClusterProxy.GetKubeconfigPath(),
+			Flavor:                   "machinedeployment",
 			Namespace:                namespace.Name,
 			ClusterName:              clusterName,
 			KubernetesVersion:        "v1.32.2",
-			ControlPlaneMachineCount: ptr.To[int64](1),
-			// TODO: make infra provider configurable
-			InfrastructureProvider: "docker",
-			LogFolder:              filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
+			ControlPlaneMachineCount: &input.controlPlaneMachineCount,
+			WorkerMachineCount:       &input.workerMachineCount,
+			InfrastructureProvider:   input.infraProvider,
+			LogFolder:                filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
 			ClusterctlVariables: map[string]string{
 				"CLUSTER_NAME": clusterName,
 				"NAMESPACE":    namespace.Name,
