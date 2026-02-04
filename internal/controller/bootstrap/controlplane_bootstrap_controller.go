@@ -791,9 +791,9 @@ func (c *ControlPlaneController) genK0sCommands(scope *ControllerScope, installC
 	commands = append(commands, downloadCommands...)
 
 	if scope.currentKCPVersion.LessThan(minVersionForETCDMemberCRD) {
-		commands = append(commands, "(command -v systemctl > /dev/null 2>&1 && (cp /k0s/k0sleave.service /etc/systemd/system/k0sleave.service && systemctl daemon-reload && systemctl enable k0sleave.service && systemctl start --no-block k0sleave.service) || true)")
-		commands = append(commands, "(command -v rc-service > /dev/null 2>&1 && (cp /k0s/k0sleave-openrc /etc/init.d/k0sleave && rc-update add k0sleave shutdown) || true)")
-		commands = append(commands, "(command -v service > /dev/null 2>&1 && (cp /k0s/k0sleave-sysv /etc/init.d/k0sleave && update-rc.d k0sleave defaults && service k0sleave start) || true)")
+		commands = append(commands, "(command -v systemctl > /dev/null 2>&1 && (cp /etc/k0s/k0sleave.service /etc/systemd/system/k0sleave.service && systemctl daemon-reload && systemctl enable k0sleave.service && systemctl start --no-block k0sleave.service) || true)")
+		commands = append(commands, "(command -v rc-service > /dev/null 2>&1 && (cp /etc/k0s/k0sleave-openrc /etc/init.d/k0sleave && rc-update add k0sleave shutdown) || true)")
+		commands = append(commands, "(command -v service > /dev/null 2>&1 && (cp /etc/k0s/k0sleave-sysv /etc/init.d/k0sleave && update-rc.d k0sleave defaults && service k0sleave start) || true)")
 	}
 	startCmd := fmt.Sprintf("%s start", filepath.Join(scope.Config.Spec.K0sInstallDir, "k0s"))
 	commands = append(commands, installCmd, startCmd)
@@ -824,7 +824,7 @@ if [ $IS_LEAVING = "true" ]; then
 fi
 `, k0sPath),
 		}, {
-			Path:        "/k0s/k0sleave.service",
+			Path:        "/etc/k0s/k0sleave.service",
 			Permissions: "0644",
 			Content: `[Unit]
 Description=k0s etcd leave service
@@ -843,7 +843,7 @@ WantedBy=multi-user.target
 `,
 		},
 		{
-			Path:        "/k0s/k0sleave-openrc",
+			Path:        "/etc/k0s/k0sleave-openrc",
 			Permissions: "0644",
 			Content: `#!/sbin/openrc-run
 
@@ -853,7 +853,7 @@ command="/etc/bin/k0sleave.sh"
 		`,
 		},
 		{
-			Path:        "/k0s/k0sleave-sysv",
+			Path:        "/etc/k0s/k0sleave-sysv",
 			Permissions: "0644",
 			Content: `#!/bin/sh
 # For RedHat and cousins:
