@@ -1,5 +1,5 @@
 resources:
-- ../cluster-template
+- ../bases/cluster-with-kcp.yaml
 
 patches:
   - target:

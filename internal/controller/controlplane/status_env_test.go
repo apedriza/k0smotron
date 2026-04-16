@@ -87,8 +87,8 @@ func TestNewReplicaStatusComputer(t *testing.T) {
 		restClient.Client = fakeClient.Client
 
 		controller := &K0sController{
-			Client:                    testEnv,
-			workloadClusterKubeClient: kubernetes.New(restClient),
+			Client:            testEnv,
+			workloadClientset: kubernetes.New(restClient),
 		}
 		require.EventuallyWithT(t, func(c *assert.CollectT) {
 			rc, err := controller.newReplicasStatusComputer(ctx, cluster, kcp)
@@ -167,8 +167,8 @@ func TestNewReplicaStatusComputer(t *testing.T) {
 		restClient.Client = fakeClient.Client
 
 		controller := &K0sController{
-			Client:                    testEnv,
-			workloadClusterKubeClient: kubernetes.New(restClient),
+			Client:            testEnv,
+			workloadClientset: kubernetes.New(restClient),
 		}
 
 		require.EventuallyWithT(t, func(c *assert.CollectT) {

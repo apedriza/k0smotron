@@ -1,6 +1,7 @@
 resources:
 - ../bases/cluster-with-hcp.yaml
-- machine-with-hostname-override.yaml
+- ../bases/machinedeployment.yaml
+#- machine-with-hostname-override.yaml
 - external-cluster-kubeconfig-reference.yaml
 
 patches:

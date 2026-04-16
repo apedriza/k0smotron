@@ -31,11 +31,13 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/test/framework"
 	capiframework "sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/bootstrap"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	"sigs.k8s.io/yaml"
 
@@ -95,6 +97,16 @@ var (
 	// flavor is the workload cluster template variant to be used for a particular test.
 	flavor string
 )
+
+type FlavorValidator interface {
+	// PreClusterInitialization allows to perform any setup needed before the cluster creation, like installing or generating needed configuration for the cluster template.
+	// It returns a map with the variables to be used in the cluster template.
+	PreClusterInitialization() (map[string]string, error)
+	// Validate performs a custom validation of the cluster after it is up and running.
+	Validate(t *testing.T, cluster *clusterv1.Cluster)
+	// PostClusterDeletion allows to perform any validation or cleanup needed after the cluster deletion.
+	PostClusterDeletion(t *testing.T, cluster *client.ObjectKey) error
+}
 
 func init() {
 

@@ -48,10 +48,12 @@ func TestWorkloadClusterUpgrade(t *testing.T) {
 //
 // 3. Performing a subsequent control plane version upgrade using the selected (flavor) upgrade strategy.
 //   - Confirms the cluster status is consistent and desired post-update.
+//
+// NOTE: We don't test the worker nodes upgrades as is supposed to be CAPI responsibility.
 func workloadClusterUpgradeSpec(t *testing.T) {
-	testName := "workload-inplace-upgrade"
-
 	require.NotEmpty(t, flavor, "a flavor between InPlace, Recreate or RecreateDeleteFirst needs to be specified for this test")
+
+	testName := fmt.Sprintf("%s-%s", "workload-upgrade", strings.ToLower(flavor))
 
 	// Setup a Namespace where to host objects for this spec and create a watcher for the namespace events.
 	namespace, _ := util.SetupSpecNamespace(ctx, testName, bootstrapClusterProxy, artifactFolder)

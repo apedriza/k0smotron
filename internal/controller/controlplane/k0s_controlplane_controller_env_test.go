@@ -927,9 +927,9 @@ func TestReconcileMachinesScaleUp(t *testing.T) {
 	require.NoError(t, err)
 
 	r := &K0sController{
-		Client:                    testEnv,
-		ClientSet:                 clientSet,
-		workloadClusterKubeClient: kubernetes.New(restClient),
+		Client:            testEnv,
+		ClientSet:         clientSet,
+		workloadClientset: kubernetes.New(restClient),
 	}
 
 	require.Eventually(t, func() bool {
@@ -986,9 +986,9 @@ func TestReconcileMachinesScaleDown(t *testing.T) {
 	require.NoError(t, err)
 
 	r := &K0sController{
-		Client:                    testEnv,
-		ClientSet:                 clientSet,
-		workloadClusterKubeClient: kubernetes.New(restClient),
+		Client:            testEnv,
+		ClientSet:         clientSet,
+		workloadClientset: kubernetes.New(restClient),
 	}
 
 	firstMachineRelatedToControlPlane := &clusterv1.Machine{
@@ -1227,9 +1227,9 @@ func TestReconcileMachinesSyncOldMachines(t *testing.T) {
 	require.NoError(t, err)
 
 	r := &K0sController{
-		Client:                    testEnv,
-		workloadClusterKubeClient: kubernetes.New(restClient),
-		ClientSet:                 clientSet,
+		Client:            testEnv,
+		workloadClientset: kubernetes.New(restClient),
+		ClientSet:         clientSet,
 	}
 
 	firstMachineRelatedToControlPlane := &clusterv1.Machine{
@@ -1516,9 +1516,10 @@ func TestReconcileInitializeControlPlanes(t *testing.T) {
 	restClient.Client = fakeClient.Client
 
 	r := &K0sController{
-		Client:                    testEnv,
-		workloadClusterKubeClient: kubernetes.New(restClient),
-		SecretCachingClient:       secretCachingClient,
+		Client:              testEnv,
+		workloadClientset:   kubernetes.New(restClient),
+		workloadClient:      testEnv,
+		SecretCachingClient: secretCachingClient,
 	}
 
 	_, err = r.Reconcile(ctx, ctrl.Request{NamespacedName: util.ObjectKey(kcp)})
@@ -1536,7 +1537,8 @@ func TestReconcileInitializeControlPlanes(t *testing.T) {
 		BlockOwnerDeletion: ptr.To(true),
 		UID:                cluster.UID,
 	})
-	require.False(t, conditions.IsFalse(kcp, string(cpv1beta2.ControlPlaneAvailableCondition)))
+	require.True(t, conditions.IsTrue(kcp, string(cpv1beta2.ControlPlaneAvailableCondition)))
+	require.True(t, *kcp.Status.Initialization.ControlPlaneInitialized)
 
 	// Expected secrets are created
 	caSecret, err := secret.GetFromNamespacedName(ctx, testEnv, client.ObjectKey{Namespace: cluster.Namespace, Name: cluster.Name}, secret.ClusterCA)

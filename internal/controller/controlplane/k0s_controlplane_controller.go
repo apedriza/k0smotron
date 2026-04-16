@@ -90,8 +90,10 @@ type K0sController struct {
 	SecretCachingClient client.Client
 	ClientSet           *kubernetes.Clientset
 	RESTConfig          *rest.Config
-	// workloadClusterKubeClient is used during testing to inject a fake client
-	workloadClusterKubeClient *kubernetes.Clientset
+	// workloadClientset is used during testing to inject a fake client
+	workloadClientset *kubernetes.Clientset
+	// workloadClient is used during testing to inject a fake client
+	workloadClient client.Client
 }
 
 // +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=k0scontrolplanes/status,verbs=get;list;watch;create;update;patch;delete
@@ -474,7 +476,7 @@ func (c *K0sController) reconcileMachines(ctx context.Context, cluster *clusterv
 				}
 			}
 		} else {
-			kubeClient, err := c.getKubeClient(ctx, cluster)
+			kubeClient, err := c.getWorkloadClientset(ctx, cluster)
 			if err != nil {
 				return fmt.Errorf("error getting cluster client set for machine update: %w", err)
 			}
@@ -597,7 +599,7 @@ func (c *K0sController) deleteK0sNodeResources(ctx context.Context, cluster *clu
 	logger := log.FromContext(ctx)
 
 	if ptr.Deref(kcp.Status.Initialization.ControlPlaneInitialized, false) {
-		kubeClient, err := c.getKubeClient(ctx, cluster)
+		kubeClient, err := c.getWorkloadClientset(ctx, cluster)
 		if err != nil {
 			return fmt.Errorf("error getting cluster client set for deletion: %w", err)
 		}
@@ -664,7 +666,7 @@ func (c *K0sController) createBootstrapConfig(ctx context.Context, name string, 
 }
 
 func (c *K0sController) checkMachineIsReady(ctx context.Context, machineName string, cluster *clusterv1.Cluster) error {
-	kubeClient, err := c.getKubeClient(ctx, cluster)
+	kubeClient, err := c.getWorkloadClientset(ctx, cluster)
 	if err != nil {
 		return fmt.Errorf("error getting cluster client set for machine update: %w", err)
 	}

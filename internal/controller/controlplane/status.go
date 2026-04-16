@@ -85,7 +85,7 @@ func (c *K0sController) newReplicasStatusComputer(ctx context.Context, cluster *
 
 	switch kcp.Spec.UpdateStrategy {
 	case cpv1beta2.UpdateInPlace:
-		kc, err := c.getKubeClient(ctx, cluster)
+		kc, err := c.getWorkloadClientset(ctx, cluster)
 		if err != nil {
 			return nil, err
 		}
@@ -312,11 +312,18 @@ func (c *K0sController) computeAvailability(ctx context.Context, cluster *cluste
 	// and checking if the control plane is initialized
 	logger.Info("Pinging the workload cluster API")
 	// Get the CAPI cluster accessor
-	client, err := remote.NewClusterClient(ctx, "k0smotron", c.Client, util.ObjectKey(cluster))
-	if err != nil {
-		logger.Info("Failed to create cluster client", "error", err)
-		return
+	var client client.Client
+	if c.workloadClient != nil {
+		client = c.workloadClient
+	} else {
+		var err error
+		client, err = remote.NewClusterClient(ctx, "k0smotron", c.Client, util.ObjectKey(cluster))
+		if err != nil {
+			logger.Info("Failed to create cluster client", "error", err)
+			return
+		}
 	}
+
 	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -326,7 +333,7 @@ func (c *K0sController) computeAvailability(ctx context.Context, cluster *cluste
 		Namespace: "",
 		Name:      "kube-system",
 	}
-	err = client.Get(pingCtx, nsKey, ns)
+	err := client.Get(pingCtx, nsKey, ns)
 	if err != nil {
 		logger.Info("Failed to ping the workload cluster API", "error", err)
 		return

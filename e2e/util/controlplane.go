@@ -26,11 +26,12 @@ import (
 
 	"k8s.io/klog/v2"
 
-	cpv1beta1 "github.com/k0sproject/k0smotron/api/controlplane/v1beta1"
+	cpv1beta2 "github.com/k0sproject/k0smotron/api/controlplane/v1beta2"
 	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	capiframework "sigs.k8s.io/cluster-api/test/framework"
@@ -38,30 +39,33 @@ import (
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func WaitForControlPlaneToBeReady(ctx context.Context, client crclient.Client, cp *cpv1beta1.K0sControlPlane, interval Interval) error {
+func WaitForControlPlaneToBeReady(ctx context.Context, client crclient.Client, cp *unstructured.Unstructured, interval Interval) error {
 	fmt.Println("Waiting for the control plane to be ready")
 
 	controlplaneObjectKey := crclient.ObjectKey{
-		Name:      cp.Name,
-		Namespace: cp.Namespace,
+		Name:      cp.GetName(),
+		Namespace: cp.GetNamespace(),
 	}
-	controlplane := &cpv1beta1.K0sControlPlane{}
+	controlplane := &unstructured.Unstructured{}
 	err := wait.PollUntilContextTimeout(ctx, interval.tick, interval.timeout, true, func(ctx context.Context) (done bool, err error) {
 		if err := client.Get(ctx, controlplaneObjectKey, controlplane); err != nil {
 			return false, errors.Wrapf(err, "failed to get controlplane")
 		}
 
-		desiredReplicas := controlplane.Spec.Replicas
-		statusReplicas := controlplane.Status.Replicas
-		updatedReplicas := controlplane.Status.UpdatedReplicas
-		readyReplicas := controlplane.Status.ReadyReplicas
-		unavailableReplicas := controlplane.Status.UnavailableReplicas
+		desiredReplicas, _, _ := unstructured.NestedInt64(controlplane.Object, "spec", "replicas")
+		statusReplicas, _, _ := unstructured.NestedInt64(controlplane.Object, "status", "replicas")
+		updatedReplicas, _, _ := unstructured.NestedInt64(controlplane.Object, "status", "upToDateReplicas")
+		readyReplicas, _, _ := unstructured.NestedInt64(controlplane.Object, "status", "readyReplicas")
+		availableReplicas, _, _ := unstructured.NestedInt64(controlplane.Object, "status", "availableReplicas")
+		unavailableReplicas := desiredReplicas - availableReplicas
+		versionInSpec, _, _ := unstructured.NestedString(controlplane.Object, "spec", "version")
+		versionInStatus, _, _ := unstructured.NestedString(controlplane.Object, "status", "version")
 
 		if statusReplicas != desiredReplicas ||
 			updatedReplicas != desiredReplicas ||
 			readyReplicas != desiredReplicas ||
 			unavailableReplicas > 0 ||
-			controlplane.Spec.Version != controlplane.Status.Version {
+			versionInSpec != versionInStatus {
 			return false, nil
 		}
 
@@ -79,7 +83,7 @@ type UpgradeControlPlaneAndWaitForUpgradeInput struct {
 	GetLister                        capiframework.GetLister
 	ClusterProxy                     capiframework.ClusterProxy
 	Cluster                          *clusterv1.Cluster
-	ControlPlane                     *cpv1beta1.K0sControlPlane
+	ControlPlane                     *unstructured.Unstructured
 	KubernetesUpgradeVersion         string
 	WaitForKubeProxyUpgradeInterval  Interval
 	WaitForControlPlaneReadyInterval Interval
@@ -95,7 +99,9 @@ func UpgradeControlPlaneAndWaitForReadyUpgrade(ctx context.Context, input Upgrad
 		return err
 	}
 
-	input.ControlPlane.Spec.Version = input.KubernetesUpgradeVersion
+	if err := unstructured.SetNestedField(input.ControlPlane.Object, input.KubernetesUpgradeVersion, "spec", "version"); err != nil {
+		return fmt.Errorf("failed to set new kubernetes version to controlplane %s: %w", klog.KObj(input.ControlPlane), err)
+	}
 
 	err = wait.PollUntilContextTimeout(ctx, time.Second, time.Minute, true, func(ctx context.Context) (done bool, err error) {
 		return patchHelper.Patch(ctx, input.ControlPlane) == nil, nil
@@ -118,10 +124,10 @@ func UpgradeControlPlaneAndWaitForReadyUpgrade(ctx context.Context, input Upgrad
 	}, input.WaitForKubeProxyUpgradeInterval)
 }
 
-func DiscoveryAndWaitForControlPlaneInitialized(ctx context.Context, input capiframework.DiscoveryAndWaitForControlPlaneInitializedInput, interval Interval) (*cpv1beta1.K0sControlPlane, error) {
-	var controlPlane *cpv1beta1.K0sControlPlane
+func DiscoveryAndWaitForControlPlaneInitialized(ctx context.Context, input capiframework.DiscoveryAndWaitForControlPlaneInitializedInput, interval Interval) (*unstructured.Unstructured, error) {
+	var controlPlane *unstructured.Unstructured
 	err := wait.PollUntilContextTimeout(ctx, time.Second, 10*time.Minute, true, func(ctx context.Context) (done bool, err error) {
-		controlPlane, err = getK0sControlPlaneByCluster(ctx, GetK0sControlPlaneByClusterInput{
+		controlPlane, err = getControlPlaneByCluster(ctx, GetControlPlaneByClusterInput{
 			Lister:      input.Lister,
 			ClusterName: input.Cluster.Name,
 			Namespace:   input.Cluster.Namespace,
@@ -130,46 +136,82 @@ func DiscoveryAndWaitForControlPlaneInitialized(ctx context.Context, input capif
 			return false, err
 		}
 
-		return controlPlane != nil, nil
+		if controlPlane == nil {
+			return false, nil
+		}
+
+		initialized, found, err := unstructured.NestedBool(
+			controlPlane.Object,
+			"status",
+			"initialization",
+			"controlPlaneInitialized",
+		)
+		if err != nil {
+			return false, fmt.Errorf("invalid type for controlPlaneInitialized: %w", err)
+		}
+
+		if !found {
+			return false, nil
+		}
+
+		return initialized, nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("couldn't get the control plane for the cluster %s: %w", klog.KObj(input.Cluster), err)
-	}
-
-	fmt.Printf("Waiting for the first control plane machine managed by %s to be provisioned", klog.KObj(controlPlane))
-	err = WaitForOneK0sControlPlaneMachineToExist(ctx, WaitForOneK0sControlPlaneMachineToExistInput{
-		Lister:       input.Lister,
-		Cluster:      input.Cluster,
-		ControlPlane: controlPlane,
-	}, interval)
-	if err != nil {
-		return nil, fmt.Errorf("error waiting for the first control machine to be provisioned: %w", err)
+		return nil, fmt.Errorf("error waiting for control plane to be initialized for %s: %w", klog.KObj(input.Cluster), err)
 	}
 
 	return controlPlane, nil
 }
 
-type GetK0sControlPlaneByClusterInput struct {
+type GetControlPlaneByClusterInput struct {
 	Lister      capiframework.Lister
 	ClusterName string
 	Namespace   string
 }
 
-func getK0sControlPlaneByCluster(ctx context.Context, input GetK0sControlPlaneByClusterInput) (*cpv1beta1.K0sControlPlane, error) {
-	controlPlaneList := &cpv1beta1.K0sControlPlaneList{}
+func getControlPlaneByCluster(ctx context.Context, input GetControlPlaneByClusterInput) (*unstructured.Unstructured, error) {
+	k0sControlPlaneList := &cpv1beta2.K0sControlPlaneList{}
 	err := wait.PollUntilContextTimeout(ctx, time.Second, time.Minute, true, func(ctx context.Context) (done bool, err error) {
-		return input.Lister.List(ctx, controlPlaneList, byClusterOptions(input.ClusterName, input.Namespace)...) == nil, nil
+		return input.Lister.List(ctx, k0sControlPlaneList, byClusterOptions(input.ClusterName, input.Namespace)...) == nil, nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list K0sControlPlane object for Cluster %s", klog.KRef(input.Namespace, input.ClusterName))
 	}
-
-	if len(controlPlaneList.Items) > 1 {
+	if len(k0sControlPlaneList.Items) > 1 {
 		return nil, fmt.Errorf("cluster %s should not have more than 1 K0sControlPlane object", klog.KRef(input.Namespace, input.ClusterName))
 	}
+	if len(k0sControlPlaneList.Items) == 1 {
+		objMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&k0sControlPlaneList.Items[0])
+		if err != nil {
+			return nil, err
+		}
 
-	if len(controlPlaneList.Items) == 1 {
-		return &controlPlaneList.Items[0], nil
+		unstructuredControlPlane := &unstructured.Unstructured{
+			Object: objMap,
+		}
+		return unstructuredControlPlane, nil
+	}
+
+	k0smotronControlPlaneList := &cpv1beta2.K0smotronControlPlaneList{}
+	err = wait.PollUntilContextTimeout(ctx, time.Second, time.Minute, true, func(ctx context.Context) (done bool, err error) {
+		return input.Lister.List(ctx, k0smotronControlPlaneList, byClusterOptions(input.ClusterName, input.Namespace)...) == nil, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list K0smotronControlPlane object for Cluster %s", klog.KRef(input.Namespace, input.ClusterName))
+	}
+	if len(k0smotronControlPlaneList.Items) > 1 {
+		return nil, fmt.Errorf("cluster %s should not have more than 1 K0smotronControlPlane object", klog.KRef(input.Namespace, input.ClusterName))
+	}
+	if len(k0smotronControlPlaneList.Items) == 1 {
+		objMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&k0smotronControlPlaneList.Items[0])
+		if err != nil {
+			return nil, err
+		}
+
+		unstructuredControlPlane := &unstructured.Unstructured{
+			Object: objMap,
+		}
+		return unstructuredControlPlane, nil
 	}
 
 	return nil, nil
@@ -188,38 +230,7 @@ func byClusterOptions(name, namespace string) []crclient.ListOption {
 type WaitForOneK0sControlPlaneMachineToExistInput struct {
 	Lister       capiframework.Lister
 	Cluster      *clusterv1.Cluster
-	ControlPlane *cpv1beta1.K0sControlPlane
-}
-
-// WaitForOneK0sControlPlaneMachineToExist will wait until all control plane machines have node refs.
-func WaitForOneK0sControlPlaneMachineToExist(ctx context.Context, input WaitForOneK0sControlPlaneMachineToExistInput, interval Interval) error {
-	fmt.Println("Waiting for one control plane node to exist")
-	inClustersNamespaceListOption := crclient.InNamespace(input.Cluster.Namespace)
-	// ControlPlane labels
-	matchClusterListOption := crclient.MatchingLabels{
-		clusterv1.MachineControlPlaneLabel: "true",
-		clusterv1.ClusterNameLabel:         input.Cluster.Name,
-	}
-
-	err := wait.PollUntilContextTimeout(ctx, interval.tick, interval.timeout, true, func(ctx context.Context) (done bool, err error) {
-		machineList := &clusterv1.MachineList{}
-		if err := input.Lister.List(ctx, machineList, inClustersNamespaceListOption, matchClusterListOption); err != nil {
-			fmt.Printf("failed to list the machines: %+v", err)
-			return false, err
-		}
-		count := 0
-		for _, machine := range machineList.Items {
-			if machine.Status.NodeRef.Name != "" {
-				count++
-			}
-		}
-		return count > 0, nil
-	})
-	if err != nil {
-		return fmt.Errorf("no Control Plane machines came into existence: %w", err)
-	}
-
-	return nil
+	ControlPlane *cpv1beta2.K0sControlPlane
 }
 
 type WaitForKubeProxyUpgradeInput struct {
