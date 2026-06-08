@@ -119,8 +119,8 @@ jobs:
       max-parallel: 1
       matrix:
         e2e-suite:
-          - TestIgnitionProvisioning
-          #- TestWindowsProvisioning
+          #- TestIgnitionProvisioning
+          - TestWindowsProvisioning
     env:
       SSH_KEY_NAME: ${{ secrets.SSH_KEY_NAME }}
       SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
