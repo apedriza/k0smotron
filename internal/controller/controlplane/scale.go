@@ -166,10 +166,11 @@ func (c *K0sController) scaleUp(ctx context.Context, scope *controlplane) error 
 	logger := log.FromContext(ctx)
 	newMachineName := names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", scope.kcp.Name))
 
-	infraMachine, err := c.createMachineFromTemplate(ctx, newMachineName, scope.cluster, scope.kcp)
+	infraMachine, err := c.createInfraMachine(ctx, newMachineName, scope.cluster, scope.kcp)
 	if err != nil {
-		return fmt.Errorf("error creating machine from template: %w", err)
+		return err
 	}
+	logger.Info("Infrastructure machine created for new control plane machine", "infraMachine", infraMachine.GetName())
 
 	infraRef := clusterv1.ContractVersionedObjectReference{
 		Kind:     infraMachine.GetKind(),

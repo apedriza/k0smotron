@@ -224,6 +224,11 @@ func (c *K0sController) Reconcile(ctx context.Context, req ctrl.Request) (res ct
 
 	log = log.WithValues("cluster", cluster.Name)
 
+	if err := c.reconcileExternalReference(ctx, controlplane); err != nil {
+		log.Error(err, "Failed to reconcile external reference")
+		return ctrl.Result{}, err
+	}
+
 	if err := c.ensureCertificates(ctx, controlplane); err != nil {
 		log.Error(err, "Failed to ensure certificates")
 		return ctrl.Result{}, err
@@ -245,6 +250,37 @@ func (c *K0sController) Reconcile(ctx context.Context, req ctrl.Request) (res ct
 	}
 
 	return c.reconcileMachines(ctx, controlplane)
+}
+
+func (c *K0sController) reconcileExternalReference(ctx context.Context, controlplane *controlplane) error {
+	kcp := controlplane.kcp
+
+	ref := kcp.Spec.MachineTemplate.InfrastructureRef
+	if !strings.HasSuffix(ref.Kind, clusterv1.TemplateSuffix) {
+		return nil
+	}
+
+	obj, err := external.GetObjectFromContractVersionedRef(ctx, c, ref, kcp.Namespace)
+	if err != nil {
+		return err
+	}
+
+	cluster := controlplane.cluster
+
+	desiredOwnerRef := metav1.OwnerReference{
+		APIVersion: clusterv1.GroupVersion.String(),
+		Kind:       "Cluster",
+		Name:       cluster.Name,
+		UID:        cluster.UID,
+	}
+
+	if capiutil.HasExactOwnerRef(obj.GetOwnerReferences(), desiredOwnerRef) {
+		return nil
+	}
+
+	original := obj.DeepCopyObject().(client.Object)
+	obj.SetOwnerReferences(capiutil.EnsureOwnerRef(obj.GetOwnerReferences(), desiredOwnerRef))
+	return c.Client.Patch(ctx, obj, client.MergeFrom(original))
 }
 
 func (c *K0sController) reconcileKubeconfig(ctx context.Context, controlplane *controlplane) error {
