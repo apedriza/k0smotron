@@ -15,6 +15,10 @@ K8S_VERSION ?= v$(kubernetes_version)
 # since the workload cluster's version has to match the kubelet/kubeadm
 # baked into the image.
 KUBEADM_NODE_IMAGE_VERSION ?= v1.31.6
+# Same, for the kubeadm-worker-join test. The kubelet of that node must not be
+# newer than the Kubernetes version of k0s (see defaultK0sVersion in the test),
+# nor more than three minor versions behind it.
+KUBEADM_JOIN_NODE_IMAGE_VERSION ?= v1.33.1
 TIMEOUT ?= 8m
 
 .PHONY: $(smoketests)
@@ -40,6 +44,10 @@ kubeadm_node_build_cmdline := \
 
 .kubeadm-node.stamp: Makefile.variables kubeadm-node/Dockerfile
 	docker build $(kubeadm_node_build_cmdline)
+	touch $@
+
+.kubeadm-node-join.stamp: Makefile.variables kubeadm-node/Dockerfile
+	docker build --build-arg NODE_IMAGE=kindest/node:$(KUBEADM_JOIN_NODE_IMAGE_VERSION) -t kubeadm-node-join -f kubeadm-node/Dockerfile kubeadm-node
 	touch $@
 
 $(smoketests): K0S_PATH ?= $(realpath ../k0s)
@@ -82,3 +90,6 @@ check-upgrade: TIMEOUT=20m
 check-capi-controlplane-kubeadm-remote-machine: TIMEOUT=15m
 check-capi-controlplane-kubeadm-remote-machine: K8S_VERSION=$(KUBEADM_NODE_IMAGE_VERSION)
 check-capi-controlplane-kubeadm-remote-machine: .kubeadm-node.stamp
+# Needs KUBECONFIG of a kind cluster with CAPI and k0smotron.
+check-kubeadm-worker-join: TIMEOUT=20m
+check-kubeadm-worker-join: .kubeadm-node-join.stamp

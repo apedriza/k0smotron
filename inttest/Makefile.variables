@@ -39,4 +39,5 @@ smoketests := \
     check-capi-docker-machine-template-update-recreate-single \
     check-capi-multi-instance-watch-selector \
     check-capi-controlplane-kubeadm-remote-machine \
+    check-kubeadm-worker-join \
     check-upgrade \
