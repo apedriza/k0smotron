@@ -22,26 +22,30 @@ limitations under the License.
 // a K0sControlPlane on the docker infrastructure provider, with a single
 // controller and no workers.
 //
-// Everything that kubeadm expects to find is provisioned through the
-// K0sControlPlane only: the manifests that k0s applies from its manifests
-// directory (bootstrap token, kubeadm-config, kubelet-config and the RBAC for
-// them), the anonymous authentication that lets kubeadm read the cluster-info,
-// and a post-start script that publishes the cluster-info once the CA exists.
-// The bootstrap signer of the kube-controller-manager of k0s signs it.
+// Everything that kubeadm expects to find in the cluster is provisioned through
+// the K0sControlPlane only, as manifests that k0s applies from its manifests
+// directory: the bootstrap token, kubeadm-config, kubelet-config and the RBAC
+// for them.
+//
+// k0s keeps anonymous authentication disabled, so the node doesn't use token
+// discovery, which reads the cluster-info anonymously. It uses file discovery
+// instead, with a kubeconfig that carries the cluster CA and the bootstrap
+// token. kubeadm reads the cluster-info with that token, gets a 403 since
+// there is none to read, and goes on with the file.
+//
+// The load balancer of the docker provider checks the API server with an
+// anonymous GET /healthz, which k0s rejects. The test gives it a template that
+// checks the backends over TCP instead.
 //
 // The kubeadm node is a kubeadm-node-join container, started directly with
 // docker for the same reasons as in the capi-controlplane-kubeadm-remote-machine
-// test. It joins through the address that the cluster-info publishes, on the
-// "kind" docker network that the controller is on as well.
+// test. It joins through the load balancer, on the "kind" docker network that
+// the controller is on as well.
 package kubeadmworkerjoin
 
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"crypto/x509"
-	"encoding/hex"
-	"encoding/pem"
 	"fmt"
 	"net/http"
 	"os"
@@ -61,6 +65,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
 const (
@@ -87,13 +92,10 @@ const (
 apiVersion: kubeadm.k8s.io/v1beta4
 kind: JoinConfiguration
 discovery:
-  bootstrapToken:
-    token: %[1]s
-    apiServerEndpoint: %[2]s
-    caCertHashes:
-    - %[3]s
+  file:
+    kubeConfigPath: /tmp/discovery.conf
 nodeRegistration:
-  name: %[4]s
+  name: %s
   criSocket: unix:///var/run/containerd/containerd.sock
   kubeletExtraArgs:
   - name: fail-swap-on
@@ -112,8 +114,7 @@ nodeRegistration:
   - FileContent--proc-sys-net-bridge-bridge-nf-call-iptables
 `
 
-	// What kubeadm reads while joining, as manifests for k0s to apply. The
-	// cluster-info is not part of it, since it needs the CA that k0s creates.
+	// What kubeadm reads while joining, as manifests for k0s to apply.
 	joinManifests = `
 apiVersion: v1
 kind: Secret
@@ -125,7 +126,6 @@ stringData:
   token-id: ` + tokenID + `
   token-secret: ` + tokenSecret + `
   usage-bootstrap-authentication: "true"
-  usage-bootstrap-signing: "true"
   auth-extra-groups: ` + kubeadmBootstrapGroup + `
 ---
 apiVersion: v1
@@ -156,32 +156,6 @@ data:
     clusterDomain: cluster.local
     clusterDNS:
     - 10.128.0.10
----
-# The anonymous read of the cluster-info.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: kubeadm:bootstrap-signer-clusterinfo
-  namespace: kube-public
-rules:
-- apiGroups: [""]
-  resources: [configmaps]
-  resourceNames: [cluster-info]
-  verbs: [get]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: kubeadm:bootstrap-signer-clusterinfo
-  namespace: kube-public
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: kubeadm:bootstrap-signer-clusterinfo
-subjects:
-- apiGroup: rbac.authorization.k8s.io
-  kind: User
-  name: system:anonymous
 ---
 # What joining nodes read with their bootstrap token.
 apiVersion: rbac.authorization.k8s.io/v1
@@ -303,48 +277,39 @@ subjects:
   name: system:nodes
 `
 
-	// Publishes the cluster-info as kubeadm does, once k0s is up: the cluster CA
-	// and the address of the controller, without credentials. The bootstrap
-	// signer adds the signature for the bootstrap token.
-	//
-	// The infrastructure provider runs post-start commands with a deadline, so
-	// the script waits for k0s in the background instead of blocking the
-	// command. Its output goes to /tmp/publish-cluster-info.log.
-	publishClusterInfo = `
-cat > /tmp/publish-cluster-info.sh <<'SCRIPT'
-set -x
-# The admin kubeconfig may point to the external address of the cluster, which
-# doesn't reach this controller yet. Talk to the local API server instead, with
-# the same credentials. The --server flag would drop them. The admin kubeconfig
-# doesn't exist until k0s has started, so it's copied on every attempt.
-KUBECTL="k0s kubectl --kubeconfig=/tmp/admin-local.conf"
-until sed 's|server: .*|server: https://127.0.0.1:6443|' /var/lib/k0s/pki/admin.conf > /tmp/admin-local.conf && $KUBECTL get namespace kube-public; do sleep 2; done
-CA=$(base64 -w0 /var/lib/k0s/pki/ca.crt)
-ADDRESS=$(hostname -I | awk '{print $1}')
-cat <<EOF | $KUBECTL apply -f -
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: cluster-info
-  namespace: kube-public
-data:
-  kubeconfig: |
-    apiVersion: v1
-    kind: Config
-    clusters:
-    - cluster:
-        certificate-authority-data: $CA
-        server: https://$ADDRESS:6443
-      name: ""
-EOF
-SCRIPT
-nohup sh /tmp/publish-cluster-info.sh >/tmp/publish-cluster-info.log 2>&1 &
+	// The default HAProxy template of the docker provider, with a TCP check of
+	// the backends instead of an anonymous GET /healthz, which k0s rejects with
+	// a 401 and would take them out of the load balancer.
+	haproxyConfig = `
+global
+  log /dev/log local0
+  log /dev/log local1 notice
+  daemon
+  maxconn 100000
+
+resolvers docker
+  nameserver dns 127.0.0.11:53
+
+defaults
+  log global
+  mode tcp
+  option dontlognull
+  timeout connect 5000
+  timeout client 50000
+  timeout server 50000
+  default-server init-addr none
+
+frontend control-plane
+  bind *:{{ .FrontendControlPlanePort }}
+  default_backend kube-apiservers
+
+backend kube-apiservers
+  {{range $server, $backend := .BackendServers}}
+  server {{ $server }} {{ JoinHostPort $backend.Address $.BackendControlPlanePort }} weight {{ $backend.Weight }} check resolvers docker resolve-prefer ipv4
+  {{- end}}
 `
 )
 
-// Anonymous authentication has to be enabled for the cluster-info to be read
-// without credentials. Unlike kubeadm, which only restricts it with RBAC, this
-// opens the authentication for all paths, and RBAC keeps them closed.
 var clusterYaml = template.Must(template.New("cluster").Funcs(template.FuncMap{
 	// indent indents all lines but the first, which is placed by the template.
 	"indent": func(n int, s string) string {
@@ -403,24 +368,27 @@ spec:
       metadata:
         name: k0s
       spec:
-        api:
-          extraArgs:
-            anonymous-auth: "true"
         telemetry:
           enabled: false
     files:
     - path: /var/lib/k0s/manifests/kubeadm-join/join.yaml
       content: |
         {{ indent 8 .JoinManifests }}
-    postStartCommands:
-    - |
-      {{ indent 6 .PublishClusterInfo }}
   machineTemplate:
     spec:
       infrastructureRef:
         apiGroup: infrastructure.cluster.x-k8s.io
         kind: DevMachineTemplate
         name: ` + clusterName + `-cp-template
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ` + clusterName + `-lb
+  namespace: default
+data:
+  value: |
+    {{ indent 4 .HAProxyConfig }}
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: DevCluster
@@ -429,7 +397,10 @@ metadata:
   namespace: default
 spec:
   backend:
-    docker: {}
+    docker:
+      loadBalancer:
+        customHAProxyConfigTemplateRef:
+          name: ` + clusterName + `-lb
 `))
 
 type KubeadmWorkerJoinSuite struct {
@@ -466,10 +437,10 @@ func (s *KubeadmWorkerJoinSuite) SetupSuite() {
 	s.Require().NoError(manifests.Execute(&renderedManifests, struct{ KubernetesVersion string }{kubernetesVersion}))
 
 	var yaml bytes.Buffer
-	s.Require().NoError(clusterYaml.Execute(&yaml, struct{ K0sVersion, JoinManifests, PublishClusterInfo string }{
-		K0sVersion:         k0sVersion,
-		JoinManifests:      renderedManifests.String(),
-		PublishClusterInfo: publishClusterInfo,
+	s.Require().NoError(clusterYaml.Execute(&yaml, struct{ K0sVersion, JoinManifests, HAProxyConfig string }{
+		K0sVersion:    k0sVersion,
+		JoinManifests: renderedManifests.String(),
+		HAProxyConfig: haproxyConfig,
 	}))
 	s.clusterYamlsPath = s.T().TempDir() + "/cluster.yaml"
 	s.Require().NoError(os.WriteFile(s.clusterYamlsPath, yaml.Bytes(), 0644))
@@ -501,45 +472,33 @@ func (s *KubeadmWorkerJoinSuite) TestKubeadmWorkerJoinsK0sControlPlane() {
 	}), "the load balancer of the control plane should come up")
 
 	s.T().Log("waiting for the k0s API")
-	k0sConfig := s.waitForK0sKubeconfig(ctx, lbPort)
+	k0sConfig, apiServer := s.waitForK0sKubeconfig(ctx, lbPort)
 	kc, err := kubernetes.NewForConfig(k0sConfig)
 	s.Require().NoError(err)
 
-	s.T().Log("waiting for the signed cluster-info")
-	var apiEndpoint string
+	s.T().Log("waiting for k0s to apply the bootstrap token")
 	s.Require().NoError(wait.PollUntilContextTimeout(ctx, 2*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
-		clusterInfo, err := kc.CoreV1().ConfigMaps(metav1.NamespacePublic).Get(ctx, "cluster-info", metav1.GetOptions{})
+		_, err := kc.CoreV1().Secrets(metav1.NamespaceSystem).Get(ctx, "bootstrap-token-"+tokenID, metav1.GetOptions{})
 		if err != nil {
+			s.T().Logf("bootstrap token not there yet: %v", err)
 			return false, nil
-		}
-		if _, signed := clusterInfo.Data["jws-kubeconfig-"+tokenID]; !signed {
-			return false, nil
-		}
-		kubeconfig, err := clientcmd.Load([]byte(clusterInfo.Data["kubeconfig"]))
-		if err != nil || len(kubeconfig.Clusters) != 1 {
-			return false, fmt.Errorf("unexpected cluster-info kubeconfig: %v", err)
-		}
-		for _, cluster := range kubeconfig.Clusters {
-			apiEndpoint = strings.TrimPrefix(cluster.Server, "https://")
 		}
 		return true, nil
-	}), "the cluster-info should be published and signed")
-	s.T().Logf("the cluster-info publishes %s", apiEndpoint)
-
-	caHash, err := caCertHash(k0sConfig.CAData)
-	s.Require().NoError(err)
+	}), "k0s should apply the bootstrap token")
 
 	s.T().Log("starting the kubeadm node container")
 	s.startNodeContainer(ctx)
 	s.prepareNode(ctx)
 
-	s.T().Log("checking that anonymous requests get the cluster-info, and little else")
-	s.Equal(fmt.Sprint(http.StatusOK), s.anonymousStatus(ctx, apiEndpoint, "/api/v1/namespaces/kube-public/configmaps/cluster-info"))
-	s.Equal(fmt.Sprint(http.StatusForbidden), s.anonymousStatus(ctx, apiEndpoint, "/api/v1/namespaces/kube-system/configmaps/kubeadm-config"))
-	s.Equal(fmt.Sprint(http.StatusForbidden), s.anonymousStatus(ctx, apiEndpoint, "/api/v1/nodes"))
+	s.T().Log("checking that the API server rejects anonymous requests")
+	s.Equal(fmt.Sprint(http.StatusUnauthorized), s.anonymousStatus(ctx, apiServer, "/api/v1/namespaces/kube-public/configmaps/cluster-info"))
 
-	s.T().Logf("running kubeadm join against %s", apiEndpoint)
-	joinConfig := fmt.Sprintf(joinConfiguration, tokenID+"."+tokenSecret, apiEndpoint, caHash, nodeName)
+	discoveryConfig, err := discoveryKubeconfig(apiServer, k0sConfig.CAData)
+	s.Require().NoError(err)
+	s.dockerExec(ctx, string(discoveryConfig), "sh", "-c", "cat > /tmp/discovery.conf")
+
+	s.T().Logf("running kubeadm join against %s", apiServer)
+	joinConfig := fmt.Sprintf(joinConfiguration, nodeName)
 	s.dockerExec(ctx, joinConfig, "sh", "-c", "cat > /tmp/join.yaml")
 	s.T().Logf("kubeadm join output:\n%s", s.dockerExec(ctx, "", "kubeadm", "join", "--config=/tmp/join.yaml", "--v=5"))
 
@@ -567,8 +526,10 @@ func (s *KubeadmWorkerJoinSuite) TestKubeadmWorkerJoinsK0sControlPlane() {
 
 // waitForK0sKubeconfig waits for the admin kubeconfig that Cluster API creates
 // for the k0s cluster and returns its client configuration, pointing to the
-// load balancer's published port as the capi-* tests do.
-func (s *KubeadmWorkerJoinSuite) waitForK0sKubeconfig(ctx context.Context, lbPort int) *rest.Config {
+// load balancer's published port as the capi-* tests do. It also returns the
+// original server of the kubeconfig, the load balancer's address on the docker
+// network.
+func (s *KubeadmWorkerJoinSuite) waitForK0sKubeconfig(ctx context.Context, lbPort int) (*rest.Config, string) {
 	secretName := clusterName + "-kubeconfig"
 	s.Require().NoError(util.WaitForSecret(ctx, s.client, secretName, "default"))
 	secret, err := s.client.CoreV1().Secrets("default").Get(ctx, secretName, metav1.GetOptions{})
@@ -576,8 +537,29 @@ func (s *KubeadmWorkerJoinSuite) waitForK0sKubeconfig(ctx context.Context, lbPor
 
 	cfg, err := clientcmd.RESTConfigFromKubeConfig(secret.Data["value"])
 	s.Require().NoError(err)
+	apiServer := cfg.Host
 	cfg.Host = fmt.Sprintf("localhost:%d", lbPort)
-	return cfg
+	return cfg, apiServer
+}
+
+// discoveryKubeconfig returns the kubeconfig for kubeadm's file discovery: the
+// cluster CA, and the bootstrap token as credentials, which kubeadm then uses
+// for the TLS bootstrap of the kubelet as well.
+func discoveryKubeconfig(apiServer string, caData []byte) ([]byte, error) {
+	cfg := clientcmdapi.NewConfig()
+	cfg.Clusters[clusterName] = &clientcmdapi.Cluster{
+		Server:                   apiServer,
+		CertificateAuthorityData: caData,
+	}
+	cfg.AuthInfos["tls-bootstrap-token-user"] = &clientcmdapi.AuthInfo{
+		Token: tokenID + "." + tokenSecret,
+	}
+	cfg.Contexts["default"] = &clientcmdapi.Context{
+		Cluster:  clusterName,
+		AuthInfo: "tls-bootstrap-token-user",
+	}
+	cfg.CurrentContext = "default"
+	return clientcmd.Write(*cfg)
 }
 
 // startNodeContainer runs the kubeadm-node-join image with the privileged,
@@ -640,11 +622,11 @@ func (s *KubeadmWorkerJoinSuite) dockerExec(ctx context.Context, stdin string, c
 	return out.String()
 }
 
-// anonymousStatus requests the path from the node container without
+// anonymousStatus requests the URL from the node container without
 // credentials, and returns the HTTP status code.
-func (s *KubeadmWorkerJoinSuite) anonymousStatus(ctx context.Context, endpoint, path string) string {
+func (s *KubeadmWorkerJoinSuite) anonymousStatus(ctx context.Context, apiServer, path string) string {
 	out, err := exec.CommandContext(ctx, "docker", "exec", nodeContainer,
-		"curl", "-sk", "-o", "/dev/null", "-w", "%{http_code}", "https://"+endpoint+path).Output()
+		"curl", "-sk", "-o", "/dev/null", "-w", "%{http_code}", apiServer+path).Output()
 	s.Require().NoError(err)
 	return strings.TrimSpace(string(out))
 }
@@ -680,19 +662,4 @@ func getLBPort(name string) (int, error) {
 	var port int
 	_, err = fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &port)
 	return port, err
-}
-
-// caCertHash returns the hash that `kubeadm join` pins the cluster CA with:
-// the SHA-256 of the CA certificate's Subject Public Key Info.
-func caCertHash(caPEM []byte) (string, error) {
-	block, _ := pem.Decode(caPEM)
-	if block == nil {
-		return "", fmt.Errorf("no PEM data in the cluster CA")
-	}
-	cert, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse the cluster CA: %w", err)
-	}
-	sum := sha256.Sum256(cert.RawSubjectPublicKeyInfo)
-	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
