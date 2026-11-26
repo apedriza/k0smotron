@@ -22,16 +22,18 @@ limitations under the License.
 // a K0smotronControlPlane, hosted in the management cluster and exposed with a
 // NodePort service, with no workers.
 //
-// Everything that kubeadm expects to find in the cluster is provisioned through
-// the K0smotronControlPlane only, as manifests that k0s applies from its
-// manifests directory: the bootstrap token, kubeadm-config, kubelet-config and
-// the RBAC for them.
-//
-// k0s keeps anonymous authentication disabled, so the node doesn't use token
-// discovery, which reads the cluster-info anonymously. It uses file discovery
-// instead, with a kubeconfig that carries the cluster CA and the bootstrap
-// token. kubeadm reads the cluster-info with that token, gets a 403 since
+// The node joins with a regular k0s worker join token, created with
+// `k0s token create` as for any k0s worker. The token is a kubeconfig with the
+// cluster CA and a bootstrap token, which is what kubeadm's file discovery
+// expects. k0s keeps anonymous authentication disabled, so kubeadm's token
+// discovery, which reads the cluster-info anonymously, isn't an option.
+// kubeadm reads the cluster-info with the bootstrap token, gets a 403 since
 // there is none to read, and goes on with the file.
+//
+// k0s already lets bootstrap tokens request kubelet certificates and approves
+// them. What kubeadm reads besides is provisioned through the
+// K0smotronControlPlane only, as manifests that k0s applies from its manifests
+// directory: kubeadm-config, kubelet-config and the RBAC for them.
 //
 // The kubeadm node is a kubeadm-node-join container, started directly with
 // docker for the same reasons as in the capi-controlplane-kubeadm-remote-machine
@@ -41,8 +43,11 @@ package kubeadmworkerjoin
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -61,7 +66,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
 const (
@@ -79,11 +83,8 @@ const (
 	// its Kubernetes version, nor more than three minor versions older.
 	defaultK0sVersion = "v1.33.3+k0s.0"
 
-	tokenID     = "abcdef"
-	tokenSecret = "0123456789abcdef"
-
-	// The group that kubeadm gives to bootstrap tokens used for joining nodes.
-	kubeadmBootstrapGroup = "system:bootstrappers:kubeadm:default-node-token"
+	// The group of all bootstrap tokens, which k0s worker tokens belong to.
+	bootstrappersGroup = "system:bootstrappers"
 
 	// Same kubelet fixups that Cluster API's docker provider applies to
 	// kindest/node containers, see the kubeadm remote machine test.
@@ -115,18 +116,6 @@ nodeRegistration:
 
 	// What kubeadm reads while joining, as manifests for k0s to apply.
 	joinManifests = `
-apiVersion: v1
-kind: Secret
-metadata:
-  name: bootstrap-token-` + tokenID + `
-  namespace: kube-system
-type: bootstrap.kubernetes.io/token
-stringData:
-  token-id: ` + tokenID + `
-  token-secret: ` + tokenSecret + `
-  usage-bootstrap-authentication: "true"
-  auth-extra-groups: ` + kubeadmBootstrapGroup + `
----
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -180,7 +169,7 @@ roleRef:
 subjects:
 - apiGroup: rbac.authorization.k8s.io
   kind: Group
-  name: ` + kubeadmBootstrapGroup + `
+  name: ` + bootstrappersGroup + `
 - apiGroup: rbac.authorization.k8s.io
   kind: Group
   name: system:nodes
@@ -208,7 +197,7 @@ roleRef:
 subjects:
 - apiGroup: rbac.authorization.k8s.io
   kind: Group
-  name: ` + kubeadmBootstrapGroup + `
+  name: ` + bootstrappersGroup + `
 - apiGroup: rbac.authorization.k8s.io
   kind: Group
   name: system:nodes
@@ -233,47 +222,7 @@ roleRef:
 subjects:
 - apiGroup: rbac.authorization.k8s.io
   kind: Group
-  name: ` + kubeadmBootstrapGroup + `
----
-# Bootstrap tokens may request certificates, which get approved automatically.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: kubeadm:kubelet-bootstrap
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: system:node-bootstrapper
-subjects:
-- apiGroup: rbac.authorization.k8s.io
-  kind: Group
-  name: ` + kubeadmBootstrapGroup + `
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: kubeadm:node-autoapprove-bootstrap
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: system:certificates.k8s.io:certificatesigningrequests:nodeclient
-subjects:
-- apiGroup: rbac.authorization.k8s.io
-  kind: Group
-  name: ` + kubeadmBootstrapGroup + `
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: kubeadm:node-autoapprove-certificate-rotation
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: system:certificates.k8s.io:certificatesigningrequests:selfnodeclient
-subjects:
-- apiGroup: rbac.authorization.k8s.io
-  kind: Group
-  name: system:nodes
+  name: ` + bootstrappersGroup + `
 `
 )
 
@@ -421,19 +370,26 @@ func (s *KubeadmWorkerJoinSuite) TestKubeadmWorkerJoinsK0smotronControlPlane() {
 	s.Require().NoError(err)
 
 	s.T().Log("waiting for the k0s API")
-	k0sConfig, apiServer := s.waitForK0sKubeconfig(ctx, localPort)
-	kc, err := kubernetes.NewForConfig(k0sConfig)
+	kc, err := kubernetes.NewForConfig(s.waitForK0sKubeconfig(ctx, localPort))
 	s.Require().NoError(err)
 
-	s.T().Log("waiting for k0s to apply the bootstrap token")
+	s.T().Log("waiting for k0s to apply the manifests for kubeadm")
 	s.Require().NoError(wait.PollUntilContextTimeout(ctx, 2*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
-		_, err := kc.CoreV1().Secrets(metav1.NamespaceSystem).Get(ctx, "bootstrap-token-"+tokenID, metav1.GetOptions{})
+		_, err := kc.CoreV1().ConfigMaps(metav1.NamespaceSystem).Get(ctx, "kubeadm-config", metav1.GetOptions{})
 		if err != nil {
-			s.T().Logf("bootstrap token not there yet: %v", err)
+			s.T().Logf("kubeadm-config not there yet: %v", err)
 			return false, nil
 		}
 		return true, nil
-	}), "k0s should apply the bootstrap token")
+	}), "k0s should apply the manifests for kubeadm")
+
+	s.T().Log("creating a k0s worker join token")
+	joinToken, err := util.GetJoinToken(s.client, s.restConfig, "kmc-"+clusterName+"-0", "default")
+	s.Require().NoError(err)
+	discoveryConfig, err := decodeJoinToken(joinToken)
+	s.Require().NoError(err)
+	apiServer, tokenID, err := joinTokenServerAndID(discoveryConfig)
+	s.Require().NoError(err)
 
 	s.T().Log("starting the kubeadm node container")
 	s.startNodeContainer(ctx)
@@ -442,8 +398,6 @@ func (s *KubeadmWorkerJoinSuite) TestKubeadmWorkerJoinsK0smotronControlPlane() {
 	s.T().Log("checking that the API server rejects anonymous requests")
 	s.Equal(fmt.Sprint(http.StatusUnauthorized), s.anonymousStatus(ctx, apiServer, "/api/v1/namespaces/kube-public/configmaps/cluster-info"))
 
-	discoveryConfig, err := discoveryKubeconfig(apiServer, k0sConfig.CAData)
-	s.Require().NoError(err)
 	s.dockerExec(ctx, string(discoveryConfig), "sh", "-c", "cat > /tmp/discovery.conf")
 
 	s.T().Logf("running kubeadm join against %s", apiServer)
@@ -459,7 +413,7 @@ func (s *KubeadmWorkerJoinSuite) TestKubeadmWorkerJoinsK0smotronControlPlane() {
 
 	s.T().Log("checking that the kubelet's certificate request got approved")
 	s.Require().NoError(wait.PollUntilContextTimeout(ctx, 2*time.Second, time.Minute, true, func(ctx context.Context) (bool, error) {
-		return hasIssuedKubeletCSR(ctx, kc), nil
+		return hasIssuedKubeletCSR(ctx, kc, tokenID), nil
 	}), "the CSR of the kubeadm node should be approved and issued")
 
 	// The node can't be expected to be Ready without a CNI that suits it, so
@@ -475,10 +429,8 @@ func (s *KubeadmWorkerJoinSuite) TestKubeadmWorkerJoinsK0smotronControlPlane() {
 
 // waitForK0sKubeconfig waits for the admin kubeconfig that k0smotron creates
 // for the k0s cluster and returns its client configuration, pointing to the
-// local port forwarded to the control plane pod as the capi-* tests do. It also
-// returns the original server of the kubeconfig, the NodePort address that the
-// docker network reaches.
-func (s *KubeadmWorkerJoinSuite) waitForK0sKubeconfig(ctx context.Context, localPort int) (*rest.Config, string) {
+// local port forwarded to the control plane pod as the capi-* tests do.
+func (s *KubeadmWorkerJoinSuite) waitForK0sKubeconfig(ctx context.Context, localPort int) *rest.Config {
 	secretName := clusterName + "-kubeconfig"
 	s.Require().NoError(util.WaitForSecret(ctx, s.client, secretName, "default"))
 	secret, err := s.client.CoreV1().Secrets("default").Get(ctx, secretName, metav1.GetOptions{})
@@ -486,29 +438,49 @@ func (s *KubeadmWorkerJoinSuite) waitForK0sKubeconfig(ctx context.Context, local
 
 	cfg, err := clientcmd.RESTConfigFromKubeConfig(secret.Data["value"])
 	s.Require().NoError(err)
-	apiServer := cfg.Host
 	cfg.Host = fmt.Sprintf("localhost:%d", localPort)
-	return cfg, apiServer
+	return cfg
 }
 
-// discoveryKubeconfig returns the kubeconfig for kubeadm's file discovery: the
-// cluster CA, and the bootstrap token as credentials, which kubeadm then uses
-// for the TLS bootstrap of the kubelet as well.
-func discoveryKubeconfig(apiServer string, caData []byte) ([]byte, error) {
-	cfg := clientcmdapi.NewConfig()
-	cfg.Clusters[clusterName] = &clientcmdapi.Cluster{
-		Server:                   apiServer,
-		CertificateAuthorityData: caData,
+// decodeJoinToken decodes a k0s join token, a gzipped and base64 encoded
+// kubeconfig with the cluster CA and a bootstrap token.
+func decodeJoinToken(token string) ([]byte, error) {
+	gzData, err := base64.StdEncoding.DecodeString(strings.TrimSpace(token))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode the join token: %w", err)
 	}
-	cfg.AuthInfos["tls-bootstrap-token-user"] = &clientcmdapi.AuthInfo{
-		Token: tokenID + "." + tokenSecret,
+	gz, err := gzip.NewReader(bytes.NewReader(gzData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decompress the join token: %w", err)
 	}
-	cfg.Contexts["default"] = &clientcmdapi.Context{
-		Cluster:  clusterName,
-		AuthInfo: "tls-bootstrap-token-user",
+	defer gz.Close()
+	return io.ReadAll(gz)
+}
+
+// joinTokenServerAndID returns the API server address and the ID of the
+// bootstrap token of a decoded k0s join token.
+func joinTokenServerAndID(kubeconfig []byte) (string, string, error) {
+	cfg, err := clientcmd.Load(kubeconfig)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to parse the join token: %w", err)
 	}
-	cfg.CurrentContext = "default"
-	return clientcmd.Write(*cfg)
+	kubeContext, ok := cfg.Contexts[cfg.CurrentContext]
+	if !ok {
+		return "", "", fmt.Errorf("no current context in the join token")
+	}
+	cluster, ok := cfg.Clusters[kubeContext.Cluster]
+	if !ok {
+		return "", "", fmt.Errorf("no cluster %q in the join token", kubeContext.Cluster)
+	}
+	authInfo, ok := cfg.AuthInfos[kubeContext.AuthInfo]
+	if !ok {
+		return "", "", fmt.Errorf("no user %q in the join token", kubeContext.AuthInfo)
+	}
+	tokenID, _, found := strings.Cut(authInfo.Token, ".")
+	if !found {
+		return "", "", fmt.Errorf("no bootstrap token in the join token")
+	}
+	return cluster.Server, tokenID, nil
 }
 
 // startNodeContainer runs the kubeadm-node-join image with the privileged,
@@ -582,7 +554,7 @@ func (s *KubeadmWorkerJoinSuite) anonymousStatus(ctx context.Context, apiServer,
 
 // hasIssuedKubeletCSR reports whether a kubelet client CSR requested by the
 // bootstrap token has been approved and signed.
-func hasIssuedKubeletCSR(ctx context.Context, kc kubernetes.Interface) bool {
+func hasIssuedKubeletCSR(ctx context.Context, kc kubernetes.Interface, tokenID string) bool {
 	csrs, err := kc.CertificatesV1().CertificateSigningRequests().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return false
