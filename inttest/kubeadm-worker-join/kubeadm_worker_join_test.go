@@ -19,13 +19,13 @@ limitations under the License.
 //
 // Like the capi-* tests, it runs against an existing kind management cluster
 // (KUBECONFIG) that has Cluster API and k0smotron installed. The k0s cluster is
-// a K0sControlPlane on the docker infrastructure provider, with a single
-// controller and no workers.
+// a K0smotronControlPlane, hosted in the management cluster and exposed with a
+// NodePort service, with no workers.
 //
 // Everything that kubeadm expects to find in the cluster is provisioned through
-// the K0sControlPlane only, as manifests that k0s applies from its manifests
-// directory: the bootstrap token, kubeadm-config, kubelet-config and the RBAC
-// for them.
+// the K0smotronControlPlane only, as manifests that k0s applies from its
+// manifests directory: the bootstrap token, kubeadm-config, kubelet-config and
+// the RBAC for them.
 //
 // k0s keeps anonymous authentication disabled, so the node doesn't use token
 // discovery, which reads the cluster-info anonymously. It uses file discovery
@@ -33,14 +33,10 @@ limitations under the License.
 // token. kubeadm reads the cluster-info with that token, gets a 403 since
 // there is none to read, and goes on with the file.
 //
-// The load balancer of the docker provider checks the API server with an
-// anonymous GET /healthz, which k0s rejects. The test gives it a template that
-// checks the backends over TCP instead.
-//
 // The kubeadm node is a kubeadm-node-join container, started directly with
 // docker for the same reasons as in the capi-controlplane-kubeadm-remote-machine
-// test. It joins through the load balancer, on the "kind" docker network that
-// the controller is on as well.
+// test. It joins through the NodePort of the control plane, on the "kind"
+// docker network that the management cluster is on as well.
 package kubeadmworkerjoin
 
 import (
@@ -74,6 +70,9 @@ const (
 	nodeName      = "kubeadm-worker"
 	nodeImage     = "kubeadm-node-join"
 	dockerNetwork = "kind"
+
+	// The default API port of k0smotron control planes, as their NodePort.
+	apiPort = 30443
 
 	// The k0s version of the control plane, can be overridden with
 	// K0S_CP_VERSION. The kubelet of the kubeadm node must not be newer than
@@ -276,38 +275,6 @@ subjects:
   kind: Group
   name: system:nodes
 `
-
-	// The default HAProxy template of the docker provider, with a TCP check of
-	// the backends instead of an anonymous GET /healthz, which k0s rejects with
-	// a 401 and would take them out of the load balancer.
-	haproxyConfig = `
-global
-  log /dev/log local0
-  log /dev/log local1 notice
-  daemon
-  maxconn 100000
-
-resolvers docker
-  nameserver dns 127.0.0.11:53
-
-defaults
-  log global
-  mode tcp
-  option dontlognull
-  timeout connect 5000
-  timeout client 50000
-  timeout server 50000
-  default-server init-addr none
-
-frontend control-plane
-  bind *:{{ .FrontendControlPlanePort }}
-  default_backend kube-apiservers
-
-backend kube-apiservers
-  {{range $server, $backend := .BackendServers}}
-  server {{ $server }} {{ JoinHostPort $backend.Address $.BackendControlPlanePort }} weight {{ $backend.Weight }} check resolvers docker resolve-prefer ipv4
-  {{- end}}
-`
 )
 
 var clusterYaml = template.Must(template.New("cluster").Funcs(template.FuncMap{
@@ -332,63 +299,41 @@ spec:
       - 10.128.0.0/12
   controlPlaneRef:
     apiVersion: controlplane.cluster.x-k8s.io/v1beta1
-    kind: K0sControlPlane
+    kind: K0smotronControlPlane
     name: ` + clusterName + `
   infrastructureRef:
     apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
     kind: DevCluster
     name: ` + clusterName + `
 ---
-apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
-kind: DevMachineTemplate
+apiVersion: v1
+kind: Secret
 metadata:
-  name: ` + clusterName + `-cp-template
+  name: ` + clusterName + `-join-manifests
   namespace: default
-spec:
-  template:
-    spec:
-      backend:
-        docker:
-          customImage: kindest/node:v1.31.0
+stringData:
+  join.yaml: |
+    {{ indent 4 .JoinManifests }}
 ---
 apiVersion: controlplane.cluster.x-k8s.io/v1beta1
-kind: K0sControlPlane
+kind: K0smotronControlPlane
 metadata:
   name: ` + clusterName + `
   namespace: default
 spec:
-  replicas: 1
   version: {{ .K0sVersion }}
-  k0sConfigSpec:
-    args:
-      - --enable-worker
-    k0s:
-      apiVersion: k0s.k0sproject.io/v1beta1
-      kind: ClusterConfig
-      metadata:
-        name: k0s
-      spec:
-        telemetry:
-          enabled: false
-    files:
-    - path: /var/lib/k0s/manifests/kubeadm-join/join.yaml
-      content: |
-        {{ indent 8 .JoinManifests }}
-  machineTemplate:
+  service:
+    type: NodePort
+  manifests:
+  - name: kubeadm-join
+    secret:
+      secretName: ` + clusterName + `-join-manifests
+  k0sConfig:
+    apiVersion: k0s.k0sproject.io/v1beta1
+    kind: ClusterConfig
     spec:
-      infrastructureRef:
-        apiGroup: infrastructure.cluster.x-k8s.io
-        kind: DevMachineTemplate
-        name: ` + clusterName + `-cp-template
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: ` + clusterName + `-lb
-  namespace: default
-data:
-  value: |
-    {{ indent 4 .HAProxyConfig }}
+      telemetry:
+        enabled: false
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: DevCluster
@@ -397,10 +342,7 @@ metadata:
   namespace: default
 spec:
   backend:
-    docker:
-      loadBalancer:
-        customHAProxyConfigTemplateRef:
-          name: ` + clusterName + `-lb
+    docker: {}
 `))
 
 type KubeadmWorkerJoinSuite struct {
@@ -408,6 +350,7 @@ type KubeadmWorkerJoinSuite struct {
 
 	ctx              context.Context
 	client           *kubernetes.Clientset
+	restConfig       *rest.Config
 	clusterYamlsPath string
 }
 
@@ -427,6 +370,7 @@ func (s *KubeadmWorkerJoinSuite) SetupSuite() {
 
 	restCfg, err := clientcmd.BuildConfigFromFlags("", kubeConfigPath)
 	s.Require().NoError(err)
+	s.restConfig = restCfg
 	s.client, err = kubernetes.NewForConfig(restCfg)
 	s.Require().NoError(err)
 
@@ -437,10 +381,9 @@ func (s *KubeadmWorkerJoinSuite) SetupSuite() {
 	s.Require().NoError(manifests.Execute(&renderedManifests, struct{ KubernetesVersion string }{kubernetesVersion}))
 
 	var yaml bytes.Buffer
-	s.Require().NoError(clusterYaml.Execute(&yaml, struct{ K0sVersion, JoinManifests, HAProxyConfig string }{
+	s.Require().NoError(clusterYaml.Execute(&yaml, struct{ K0sVersion, JoinManifests string }{
 		K0sVersion:    k0sVersion,
 		JoinManifests: renderedManifests.String(),
-		HAProxyConfig: haproxyConfig,
 	}))
 	s.clusterYamlsPath = s.T().TempDir() + "/cluster.yaml"
 	s.Require().NoError(os.WriteFile(s.clusterYamlsPath, yaml.Bytes(), 0644))
@@ -448,7 +391,7 @@ func (s *KubeadmWorkerJoinSuite) SetupSuite() {
 	s.ctx, _ = util.NewSuiteContext(s.T())
 }
 
-func (s *KubeadmWorkerJoinSuite) TestKubeadmWorkerJoinsK0sControlPlane() {
+func (s *KubeadmWorkerJoinSuite) TestKubeadmWorkerJoinsK0smotronControlPlane() {
 	ctx := s.ctx
 
 	s.T().Log("creating the k0s control plane, provisioned with what kubeadm needs")
@@ -461,18 +404,24 @@ func (s *KubeadmWorkerJoinSuite) TestKubeadmWorkerJoinsK0sControlPlane() {
 		}
 		s.T().Log("deleting cluster objects")
 		s.Require().NoError(util.DeleteCluster(clusterName))
+		_ = exec.Command("kubectl", "delete", "--ignore-not-found", "-f", s.clusterYamlsPath).Run()
 		s.T().Log("removing the node container")
 		_ = exec.Command("docker", "rm", "-f", nodeContainer).Run()
 	}()
 
-	var lbPort int
-	s.Require().NoError(wait.PollUntilContextTimeout(ctx, time.Second, 2*time.Minute, true, func(_ context.Context) (bool, error) {
-		lbPort, _ = getLBPort(clusterName + "-lb")
-		return lbPort > 0, nil
-	}), "the load balancer of the control plane should come up")
+	s.T().Log("waiting for the control plane pod")
+	s.Require().NoError(util.WaitForStatefulSet(ctx, s.client, "kmc-"+clusterName, "default"))
+
+	fw, err := util.GetPortForwarder(s.restConfig, "kmc-"+clusterName+"-0", "default", apiPort)
+	s.Require().NoError(err)
+	go fw.Start(s.Require().NoError)
+	defer fw.Close()
+	<-fw.ReadyChan
+	localPort, err := fw.LocalPort()
+	s.Require().NoError(err)
 
 	s.T().Log("waiting for the k0s API")
-	k0sConfig, apiServer := s.waitForK0sKubeconfig(ctx, lbPort)
+	k0sConfig, apiServer := s.waitForK0sKubeconfig(ctx, localPort)
 	kc, err := kubernetes.NewForConfig(k0sConfig)
 	s.Require().NoError(err)
 
@@ -524,12 +473,12 @@ func (s *KubeadmWorkerJoinSuite) TestKubeadmWorkerJoinsK0sControlPlane() {
 	}
 }
 
-// waitForK0sKubeconfig waits for the admin kubeconfig that Cluster API creates
+// waitForK0sKubeconfig waits for the admin kubeconfig that k0smotron creates
 // for the k0s cluster and returns its client configuration, pointing to the
-// load balancer's published port as the capi-* tests do. It also returns the
-// original server of the kubeconfig, the load balancer's address on the docker
-// network.
-func (s *KubeadmWorkerJoinSuite) waitForK0sKubeconfig(ctx context.Context, lbPort int) (*rest.Config, string) {
+// local port forwarded to the control plane pod as the capi-* tests do. It also
+// returns the original server of the kubeconfig, the NodePort address that the
+// docker network reaches.
+func (s *KubeadmWorkerJoinSuite) waitForK0sKubeconfig(ctx context.Context, localPort int) (*rest.Config, string) {
 	secretName := clusterName + "-kubeconfig"
 	s.Require().NoError(util.WaitForSecret(ctx, s.client, secretName, "default"))
 	secret, err := s.client.CoreV1().Secrets("default").Get(ctx, secretName, metav1.GetOptions{})
@@ -538,7 +487,7 @@ func (s *KubeadmWorkerJoinSuite) waitForK0sKubeconfig(ctx context.Context, lbPor
 	cfg, err := clientcmd.RESTConfigFromKubeConfig(secret.Data["value"])
 	s.Require().NoError(err)
 	apiServer := cfg.Host
-	cfg.Host = fmt.Sprintf("localhost:%d", lbPort)
+	cfg.Host = fmt.Sprintf("localhost:%d", localPort)
 	return cfg, apiServer
 }
 
@@ -649,17 +598,4 @@ func hasIssuedKubeletCSR(ctx context.Context, kc kubernetes.Interface) bool {
 		}
 	}
 	return false
-}
-
-// getLBPort returns the host port that the load balancer container publishes
-// for the API server.
-func getLBPort(name string) (int, error) {
-	out, err := exec.Command("docker", "inspect", name, "--format",
-		`{{with index .NetworkSettings.Ports "6443/tcp"}}{{(index . 0).HostPort}}{{end}}`).Output()
-	if err != nil {
-		return 0, fmt.Errorf("failed to inspect container %s: %w", name, err)
-	}
-	var port int
-	_, err = fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &port)
-	return port, err
 }
