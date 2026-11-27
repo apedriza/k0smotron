@@ -18,7 +18,7 @@ KUBEADM_NODE_IMAGE_VERSION ?= v1.31.6
 # Same, for the kubeadm-worker-join test. The kubelet of that node must not be
 # newer than the Kubernetes version of k0s (see defaultK0sVersion in the test),
 # nor more than three minor versions behind it.
-KUBEADM_JOIN_NODE_IMAGE_VERSION ?= v1.33.1
+KUBEADM_JOIN_NODE_IMAGE_VERSION ?= v1.37.0
 TIMEOUT ?= 8m
 
 .PHONY: $(smoketests)
